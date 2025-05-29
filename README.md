@@ -1,7 +1,7 @@
  
-# ECG Signal Classification with CNN (MIT-BIH Dataset)
+# ECG Signal Classification with CNN (PTB-XL Dataset)
 
-This project implements a 1D Convolutional Neural Network (CNN) to classify ECG signals using the MIT-BIH arrhythmia dataset. It was developed as a final project for an AI class and originally delivered as a `.py` script, now converted to Jupyter Notebook format.
+This project implements a 1D Convolutional Neural Network (CNN) to classify ECG signals using the PTB-XL 12-lead ECG dataset. It was developed as a final project for an AI class and originally delivered as a `.py` script, now converted to Jupyter Notebook format.
 
 ---
 
@@ -47,6 +47,7 @@ Before running the notebook or Streamlit app, fetch the datasets:
 
 ```bash
 bash download_data.sh
+```
 
 ---
 
@@ -54,7 +55,34 @@ bash download_data.sh
 
 1. Clone the repo
 2. Create environment:
+
    ```bash
    conda create -n ecg_cnn python=3.11
    conda activate ecg_cnn
    pip install -r requirements.txt
+   ```
+
+---
+
+## Quickstart
+
+
+```bash
+git clone git@github.com:shaolinpat/ecg_cnn_pytorch_demo.git
+cd ecg_cnn_pytorch_demo
+pip install -r requirements.txt
+python ecg_cnn_pytorch_demo.py
+```
+
+---
+
+# Full Dataset
+
+## If you want to reproduce the full PTB-XL results:
+
+   ```bash
+   pip install wfdb awscli`   # one-time install
+   python fetch_ptbxl.py`      # ~3 GB via S3 in <5 min
+   python build_ptbxl_sample.py` --n_records 100  # re-generate sample if desired
+   python ecg_cnn_pytorch_demo.py`  # now runs on full data
+   ```

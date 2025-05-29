@@ -16,4 +16,6 @@ __pycache__/
 .env/
 
 Outfiles_pytorch/
-data/*.csv
+data/ptbxl/
+
+results_summary_pytorch.csv
