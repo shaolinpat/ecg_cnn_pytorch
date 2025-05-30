@@ -64,25 +64,36 @@ bash download_data.sh
 
 ---
 
-## Quickstart
+## Quickstart Demo (time < 30 s)
 
+Clone the repo and run on the bundled sample data:
 
 ```bash
-git clone git@github.com:shaolinpat/ecg_cnn_pytorch_demo.git
-cd ecg_cnn_pytorch_demo
-pip install -r requirements.txt
-python ecg_cnn_pytorch_demo.py
+git clone git@github.com:yourusername/ecg_cnn.git
+cd ecg_cnn
+conda activate ecg_cnn           # or `pip install -r requirements.txt`
+python build_ptbxl_sample.py \
+  --n_records 100               # only first 100 records (if you need to regenerate)
+python train_ecg_cnn_ptbxl.py   # trains & evaluates on sample subset
 ```
 
 ---
 
-# Full Dataset
+## Full Dataset Reproduction (optional, ~3 GB, may take hours)
 
-## If you want to reproduce the full PTB-XL results:
+If you need the full 12-lead PTB-XL for deeper experiments:
 
-   ```bash
-   pip install wfdb awscli`   # one-time install
-   python fetch_ptbxl.py`      # ~3 GB via S3 in <5 min
-   python build_ptbxl_sample.py` --n_records 100  # re-generate sample if desired
-   python ecg_cnn_pytorch_demo.py`  # now runs on full data
+```bash
+# 1) Install the downloader tools
+pip install wfdb awscli
+
+# 2) Fetch the full PTB-XL archive via S3 (resumable)
+python fetch_ptbxl.py   # pulls ~3 GB; time depends on your bandwidth
+
+# 3) (Re)build the 100-record sample if you want to verify
+python build_ptbxl_sample.py --n_records 100
+
+# 4) Train/evaluate on the full data directory
+python train_ecg_cnn_ptbxl.py \
+  --data-dir data/ptbxl/physionet.org/files/ptb-xl/1.0.3
    ```
