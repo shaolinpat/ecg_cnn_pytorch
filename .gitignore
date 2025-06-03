@@ -1,21 +1,48 @@
-# Byte-compiled / cache files
+# Byte‐compiled Python files
 __pycache__/
 *.py[cod]
 
-# Jupyter checkpoints
+# Jupyter notebook checkpoints
 .ipynb_checkpoints/
 
-# VS Code settings
+# Python virtual environments (if you use venv or conda)
+env/
+venv/
+*.egg-info/
+*.egg
+
+# macOS Finder files
+.DS_Store
+
+# VSCode workspace settings
 .vscode/
 
-# Environment folders
-.env
-.envrc
-*.env
-*.venv
-.env/
+# Log files
+*.log
 
-Outfiles_pytorch/
+# Model checkpoints or saved weights
+# (if you are saving .pt or .pth in outputs/models/)
+outputs/models/
+*.pt
+*.pth
+
+# Generated plots, metrics, and CSV results
+outputs/plots/
+outputs/results/
+outputs/predictions/
+
+# Large data directories (if you reload data from elsewhere)
+data/larger_sample/
 data/ptbxl/
 
-results_summary_pytorch.csv
+# Any temporary files or caches created by your code
+*.cache
+*.tmp
+
+# If you have a requirements.txt or environment.yml tracked explicitly, keep it;
+# otherwise you can ignore pip or conda lock files.
+# *.lock
+
+# System files
+Thumbs.db
+
