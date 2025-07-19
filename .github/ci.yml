@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libsndfile1
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt || conda env update -f environment.yml --name base
+        pip install pytest pytest-cov
+
+    - name: Run tests with coverage
+      run: |
+        pytest --cov=ecg_cnn --cov-report=term --cov-report=xml
+
+    - name: Upload coverage report
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-report
+        path: coverage.xml
+
