@@ -1,6 +1,13 @@
  
 # ECG Signal Classification with CNN (PTB-XL Dataset)
 
+[![CI](https://github.com/shaolinpat/ecg_cnn_pytorch/actions/workflows/ci.yml/badge.svg)](https://github.com/shaolinpat/ecg_cnn_pytorch/actions/workflows/ci.yml)
+[![Coverage (flag)](https://img.shields.io/codecov/c/github/shaolinpat/ecg_cnn_pytorch.svg?flag=flower_classifier&branch=main)](https://codecov.io/gh/shaolinpat/ecg_cnn_pytorch)  
+[![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/release/python-3110/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/shaolinpat/ecg_cnn_pytorch/blob/main/ecg_cnn/train.py?force_reload=true)
+
+
 This project implements a 1D Convolutional Neural Network (CNN) to classify ECG signals using the PTB-XL 12-lead ECG dataset. It was developed as a final project for an AI class and originally delivered as a `.py` script, now converted to Jupyter Notebook format.
 
 ---
