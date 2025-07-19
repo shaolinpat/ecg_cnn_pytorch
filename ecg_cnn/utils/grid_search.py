@@ -1,7 +1,3 @@
-
-
-
-
 # src/grid_search.py
 
 import os
@@ -13,12 +9,17 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset, WeightedRandomSampler
 
 from itertools import product
-from model_utils import ECGConvNet
-from plot_utils import format_hparams, save_plot_curves, save_confusion_matrix
-#from sklearn.metrics import confusion_matrix, classification_report
+from ecg_cnn.models.model_utils import ECGConvNet
+from ecg_cnn.utils.plot_utils import (
+    format_hparams,
+    save_plot_curves,
+    save_confusion_matrix,
+)
+
+# from sklearn.metrics import confusion_matrix, classification_report
 
 # -------------------------------------------------------------------
-# INSERT BELOW: GLOBAL SEED & WORKER-INIT (must match main's SEED)
+# GLOBAL SEED & WORKER-INIT (must match main's SEED)
 # -------------------------------------------------------------------
 SEED = 22
 
@@ -37,7 +38,8 @@ torch.cuda.manual_seed_all(SEED)
 
 # Make cuDNN deterministic
 torch.backends.cudnn.deterministic = True
-torch.backends.cudnn.benchmark     = False
+torch.backends.cudnn.benchmark = False
+
 
 # Define worker_init_fn for DataLoader workers
 def seed_worker(worker_id):
@@ -49,25 +51,24 @@ def seed_worker(worker_id):
     random.seed(worker_seed)
     np.random.seed(worker_seed)
     torch.manual_seed(worker_seed)
+
+
 # -------------------------------------------------------------------
 # END INSERT
 # -------------------------------------------------------------------
 
 
-
-
-
 def run_manual_grid_search(
     X_train: np.ndarray,
     y_train: np.ndarray,
-    X_val:   np.ndarray,
-    y_val:   np.ndarray,
+    X_val: np.ndarray,
+    y_val: np.ndarray,
     unique_labels: list[str],
     num_classes: int,
     out_folder: str,
     model_out_folder: str,
     device: torch.device,
-    param_grid: dict
+    param_grid: dict,
 ) -> (pd.DataFrame, dict):
     """
     Performs a manual hyperparameter grid search over (epochs, batch_size, lr, weight_decay)
@@ -80,7 +81,7 @@ def run_manual_grid_search(
     Returns:
       - results_df: pandas DataFrame containing one row per hyperparameter combo, with columns
           ["fold", "epochs", "batch_size", "lr", "weight_decay", "val_acc", "model_path"].
-      - metrics: a dict mapping (fold, epoch, batch_size, lr, wd) -> 
+      - metrics: a dict mapping (fold, epoch, batch_size, lr, wd) ->
           {
             "train_losses": [...],
             "val_losses": [...],
@@ -100,18 +101,22 @@ def run_manual_grid_search(
     #     )).T.reshape(-1, 4)
     # )
 
-    combos = list(product(
-        param_grid["epochs"],
-        param_grid["batch_size"],
-        param_grid["lr"],
-        param_grid["weight_decay"]
-    ))
+    combos = list(
+        product(
+            param_grid["epochs"],
+            param_grid["batch_size"],
+            param_grid["lr"],
+            param_grid["weight_decay"],
+        )
+    )
 
     results = []
     metrics = {}
 
     for combo_idx, (epochs, bs, lr, wd) in enumerate(combos, start=1):
-        print(f"=== Combo {combo_idx}/{len(combos)}: epochs={epochs}, bs={bs}, lr={lr}, wd={wd} ===")
+        print(
+            f"=== Combo {combo_idx}/{len(combos)}: epochs={epochs}, bs={bs}, lr={lr}, wd={wd} ==="
+        )
 
         # ------------------------
         # 9C) Build WeightedRandomSampler on y_train
@@ -120,7 +125,6 @@ def run_manual_grid_search(
         class_weights = 1.0 / class_counts
         sample_weights = class_weights[y_train]
 
-
         sr_gen = torch.Generator()
         sr_gen.manual_seed(SEED)
 
@@ -128,7 +132,7 @@ def run_manual_grid_search(
             weights=sample_weights,
             num_samples=len(sample_weights),
             replacement=True,
-            generator=sr_gen
+            generator=sr_gen,
         )
 
         # ------------------------
@@ -137,24 +141,24 @@ def run_manual_grid_search(
         train_loader = DataLoader(
             TensorDataset(
                 torch.tensor(X_train, dtype=torch.float32),
-                torch.tensor(y_train, dtype=torch.long)
+                torch.tensor(y_train, dtype=torch.long),
             ),
             batch_size=bs,
             sampler=sampler,
             num_workers=4,
             pin_memory=True,
-            worker_init_fn=seed_worker 
+            worker_init_fn=seed_worker,
         )
         val_loader = DataLoader(
             TensorDataset(
                 torch.tensor(X_val, dtype=torch.float32),
-                torch.tensor(y_val, dtype=torch.long)
+                torch.tensor(y_val, dtype=torch.long),
             ),
             batch_size=bs,
             shuffle=False,
             num_workers=4,
             pin_memory=True,
-            worker_init_fn=seed_worker 
+            worker_init_fn=seed_worker,
         )
 
         # ------------------------
@@ -254,13 +258,7 @@ def run_manual_grid_search(
         # 9G) Save the best model for this combo
         # ------------------------
         fbase = format_hparams(
-            lr=lr,
-            bs=bs,
-            wd=wd,
-            fold=1,
-            epochs=epoch,
-            prefix="model",
-            fname_metric=""
+            lr=lr, bs=bs, wd=wd, fold=1, epochs=epoch, prefix="model", fname_metric=""
         )
         model_filename = fbase + ".pt"
         model_path = os.path.join(model_out_folder, model_filename)
@@ -284,7 +282,7 @@ def run_manual_grid_search(
             fold=1,
             epochs=epoch,
             out_folder=out_folder,
-            prefix="final"
+            prefix="final",
         )
         save_plot_curves(
             x_vals=train_losses,
@@ -299,7 +297,7 @@ def run_manual_grid_search(
             fold=1,
             epochs=epoch,
             out_folder=out_folder,
-            prefix="final"
+            prefix="final",
         )
 
         # (2) Confusion matrix (normalized)
@@ -314,21 +312,23 @@ def run_manual_grid_search(
             epochs=epoch,
             out_folder=out_folder,
             prefix="final",
-            normalize=True
+            normalize=True,
         )
 
         # ------------------------
         # 9I) Record this combo's results
         # ------------------------
-        results.append({
-            "fold": 1,
-            "epochs": epoch,
-            "batch_size": bs,
-            "lr": lr,
-            "weight_decay": wd,
-            "val_acc": best_acc,
-            "model_path": model_path
-        })
+        results.append(
+            {
+                "fold": 1,
+                "epochs": epoch,
+                "batch_size": bs,
+                "lr": lr,
+                "weight_decay": wd,
+                "val_acc": best_acc,
+                "model_path": model_path,
+            }
+        )
         metrics[(1, epoch, bs, lr, wd)] = {
             "train_losses": train_losses,
             "val_losses": val_losses,
@@ -343,4 +343,3 @@ def run_manual_grid_search(
     # ------------------------
     results_df = pd.DataFrame(results)
     return results_df, metrics
-

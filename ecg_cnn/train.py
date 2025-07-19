@@ -1,0 +1,97 @@
+#!/usr/bin/env python
+
+
+# ## 0. Imports
+
+import argparse
+import numpy as np
+import os
+import pandas as pd
+import random
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import time
+
+from sklearn.preprocessing import LabelEncoder
+from torch.utils.data import TensorDataset, DataLoader
+
+
+from ecg_cnn.data.data_utils import (
+    load_ptbxl_sample,
+    load_ptbxl_full,
+    FIVE_SUPERCLASSES,
+)
+from ecg_cnn.models.model_utils import ECGConvNet
+from ecg_cnn.training.cli_args import parse_args
+from ecg_cnn.training.trainer import train_one_epoch
+
+
+# ## 4. Evaluation & Visualization
+
+# ## 6. Data Loading & Subsampling
+
+
+# ## 8. Entry Point & Full Run
+
+
+if __name__ == "__main__":
+    SEED = 22
+    torch.manual_seed(SEED)
+    np.random.seed(SEED)
+    random.seed(SEED)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+    t0 = time.time()
+    args = parse_args()
+
+    # Load data
+    if args.sample_only:
+        print("Loading sample data from:", args.sample_dir)
+        X, y, meta = load_ptbxl_sample(
+            sample_dir=args.sample_dir,
+            ptb_path=args.data_dir,
+        )
+    else:
+        print("Loading full data from:", args.data_dir)
+        X, y, meta = load_ptbxl_full(
+            data_dir=args.data_dir,
+            subsample_frac=args.subsample_frac,
+            sampling_rate=100,
+        )
+
+    print("Number of records loaded:", len(meta))
+
+    # Drop "Unknown" labels
+    keep = np.array([lbl != "Unknown" for lbl in y], dtype=bool)
+    X = X[keep]
+    y = [lbl for i, lbl in enumerate(y) if keep[i]]
+    meta = meta.loc[keep].reset_index(drop=True)
+
+    # --------------------------------------------------------------------------
+    # Real training: one epoch using real model and data
+    # --------------------------------------------------------------------------
+    # Convert data to tensors
+
+    le = LabelEncoder()
+    y_tensor = torch.tensor(le.fit_transform(y)).long()  # int class IDs
+    # y_tensor = torch.tensor([1 if lbl == "MI" else 0 for lbl in y]).float()
+    X_tensor = torch.tensor(X).float()  # .unsqueeze(1)  # Add channel dimension
+
+    dataset = TensorDataset(X_tensor, y_tensor)
+    dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = ECGConvNet(num_classes=len(FIVE_SUPERCLASSES)).to(device)
+    optimizer = optim.Adam(model.parameters())
+    criterion = nn.CrossEntropyLoss()
+
+    loss = train_one_epoch(model, dataloader, optimizer, criterion, device)
+    print(f"One-epoch training complete. Loss: {loss:.4f}")
+
+    # --------------------------------------------------------------------------
+    # End
+    # --------------------------------------------------------------------------
+    elapsed = (time.time() - t0) / 60
+    print(f"Total runtime: {elapsed:.2f} minutes")

@@ -1,48 +1,41 @@
-# Byte‐compiled Python files
+# Byte-compiled Python files
 __pycache__/
 *.py[cod]
 
-# Jupyter notebook checkpoints
+# Jupyter notebooks
 .ipynb_checkpoints/
 
-# Python virtual environments (if you use venv or conda)
+# Python virtual environments
 env/
 venv/
+build/
+dist/
 *.egg-info/
 *.egg
 
-# macOS Finder files
-.DS_Store
-
-# VSCode workspace settings
+# Editor and system files
 .vscode/
+.DS_Store
+Thumbs.db
 
-# Log files
+# Logs and temporary files
 *.log
+*.cache
+*.tmp
 
-# Model checkpoints or saved weights
-# (if you are saving .pt or .pth in outputs/models/)
-outputs/models/
+# Model weights and checkpoints
 *.pt
 *.pth
+outputs/models/
 
-# Generated plots, metrics, and CSV results
+# Generated plots and results
 outputs/plots/
 outputs/results/
 outputs/predictions/
 
-# Large data directories (if you reload data from elsewhere)
+# Large raw data (excluded because reproducible elsewhere)
 data/larger_sample/
 data/ptbxl/
 
-# Any temporary files or caches created by your code
-*.cache
-*.tmp
-
-# If you have a requirements.txt or environment.yml tracked explicitly, keep it;
-# otherwise you can ignore pip or conda lock files.
-# *.lock
-
-# System files
-Thumbs.db
-
+# Getting rid of files in git history
+git rm --cached ecg_cnn/train_ecg_cnn_ptbxl.py

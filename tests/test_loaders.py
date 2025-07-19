@@ -1,16 +1,17 @@
 import numpy as np
-from utils import load_ptbxl_full, load_ptbxl_sample
+from ecg_cnn.data.data_utils import load_ptbxl_full, load_ptbxl_sample
 
 # Adjust these paths as needed for your environment:
-FULL_DATA_DIR   = "./data/ptbxl/physionet.org/files/ptb-xl/1.0.3"
-SAMPLE_DIR      = "./data/sample"
+FULL_DATA_DIR = "./data/ptbxl/physionet.org/files/ptb-xl/1.0.3"
+SAMPLE_DIR = "./data/sample"
+
 
 def test_loaders():
     # 1) Test load_ptbxl_full on a small subsample (1% of records)
     Xf, yf, meta_f = load_ptbxl_full(
         data_dir=FULL_DATA_DIR,
-        subsample_frac=0.01,   # load ~1% to keep this quick
-        sampling_rate=100
+        subsample_frac=0.01,  # load ~1% to keep this quick
+        sampling_rate=100,
     )
     print("=== Full loader (1% subsample) ===")
     print("X.shape:", Xf.shape)
@@ -27,10 +28,7 @@ def test_loaders():
     print()
 
     # 2) Test load_ptbxl_sample on the 100-record subset
-    Xs, ys, meta_s = load_ptbxl_sample(
-        sample_dir=SAMPLE_DIR,
-        ptb_path=FULL_DATA_DIR
-    )
+    Xs, ys, meta_s = load_ptbxl_sample(sample_dir=SAMPLE_DIR, ptb_path=FULL_DATA_DIR)
     print("=== Sample loader (100 records) ===")
     print("X.shape:", Xs.shape)
     print("Raw unique labels:", sorted(set(ys)))
@@ -42,6 +40,7 @@ def test_loaders():
     print("After dropping 'Unknown':")
     print("  X.shape:", Xs2.shape)
     print("  Remaining classes:", sorted(set(ys2)))
+
 
 if __name__ == "__main__":
     test_loaders()
