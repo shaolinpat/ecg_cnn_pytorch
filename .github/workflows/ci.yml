@@ -38,11 +38,11 @@ jobs:
         path: coverage.xml
 
     - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v4
+      uses: codecov/codecov-action@v5
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: coverage.xml
         flags: unittests
-        name: codecov-ecg-cnn
+        name: codecov-ecg-cnn-pytorch
         fail_ci_if_error: true
         verbose: true

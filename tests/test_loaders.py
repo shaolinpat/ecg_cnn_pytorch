@@ -1,15 +1,20 @@
 import numpy as np
+import pytest
 from ecg_cnn.data.data_utils import load_ptbxl_full, load_ptbxl_sample
+from ecg_cnn.config import PTBXL_DATA_DIR, PROJECT_ROOT
 
 # Adjust these paths as needed for your environment:
-FULL_DATA_DIR = "./data/ptbxl/physionet.org/files/ptb-xl/1.0.3"
-SAMPLE_DIR = "./data/sample"
+SAMPLE_DIR = PROJECT_ROOT / "data" / "sample"
 
 
+@pytest.mark.skipif(
+    not PTBXL_DATA_DIR.is_dir(), reason="PTB-XL full data directory not found"
+)
+@pytest.mark.skipif(not SAMPLE_DIR.is_dir(), reason="Sample data directory not found")
 def test_loaders():
     # 1) Test load_ptbxl_full on a small subsample (1% of records)
     Xf, yf, meta_f = load_ptbxl_full(
-        data_dir=FULL_DATA_DIR,
+        data_dir=PTBXL_DATA_DIR,
         subsample_frac=0.01,  # load ~1% to keep this quick
         sampling_rate=100,
     )
@@ -28,7 +33,7 @@ def test_loaders():
     print()
 
     # 2) Test load_ptbxl_sample on the 100-record subset
-    Xs, ys, meta_s = load_ptbxl_sample(sample_dir=SAMPLE_DIR, ptb_path=FULL_DATA_DIR)
+    Xs, ys, meta_s = load_ptbxl_sample(sample_dir=SAMPLE_DIR, ptb_path=PTBXL_DATA_DIR)
     print("=== Sample loader (100 records) ===")
     print("X.shape:", Xs.shape)
     print("Raw unique labels:", sorted(set(ys)))
