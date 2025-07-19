@@ -100,7 +100,7 @@ def test_train_one_epoch_end_to_end():
 
     assert isinstance(later_loss, float)
     assert later_loss >= 0.0
-    # Allow small increase but not wild instability
+    # Allow +/-1.0 wiggle room to avoid flakeouts on tiny datasets
     assert (
         abs(later_loss - initial_loss) <= 1.0
     ), f"Loss drifted: {initial_loss:.5f} -> {later_loss:.5f}"
