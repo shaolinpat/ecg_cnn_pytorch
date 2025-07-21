@@ -13,10 +13,11 @@ import torch.nn as nn
 import torch.optim as optim
 import time
 
+from pathlib import Path
 from sklearn.preprocessing import LabelEncoder
 from torch.utils.data import TensorDataset, DataLoader
 
-
+from ecg_cnn.config import PTBXL_DATA_DIR
 from ecg_cnn.data.data_utils import (
     load_ptbxl_sample,
     load_ptbxl_full,
@@ -25,14 +26,6 @@ from ecg_cnn.data.data_utils import (
 from ecg_cnn.models.model_utils import ECGConvNet
 from ecg_cnn.training.cli_args import parse_args
 from ecg_cnn.training.trainer import train_one_epoch
-
-
-# ## 4. Evaluation & Visualization
-
-# ## 6. Data Loading & Subsampling
-
-
-# ## 8. Entry Point & Full Run
 
 
 if __name__ == "__main__":
@@ -45,18 +38,19 @@ if __name__ == "__main__":
 
     t0 = time.time()
     args = parse_args()
+    data_dir = Path(args.data_dir).resolve() if args.data_dir else PTBXL_DATA_DIR
 
     # Load data
     if args.sample_only:
         print("Loading sample data from:", args.sample_dir)
         X, y, meta = load_ptbxl_sample(
             sample_dir=args.sample_dir,
-            ptb_path=args.data_dir,
+            ptb_path=data_dir,
         )
     else:
         print("Loading full data from:", args.data_dir)
         X, y, meta = load_ptbxl_full(
-            data_dir=args.data_dir,
+            data_dir=data_dir,
             subsample_frac=args.subsample_frac,
             sampling_rate=100,
         )
@@ -70,14 +64,13 @@ if __name__ == "__main__":
     meta = meta.loc[keep].reset_index(drop=True)
 
     # --------------------------------------------------------------------------
-    # Real training: one epoch using real model and data
+    # One epoch using real model and data
     # --------------------------------------------------------------------------
     # Convert data to tensors
 
     le = LabelEncoder()
     y_tensor = torch.tensor(le.fit_transform(y)).long()  # int class IDs
-    # y_tensor = torch.tensor([1 if lbl == "MI" else 0 for lbl in y]).float()
-    X_tensor = torch.tensor(X).float()  # .unsqueeze(1)  # Add channel dimension
+    X_tensor = torch.tensor(X).float()
 
     dataset = TensorDataset(X_tensor, y_tensor)
     dataloader = DataLoader(dataset, batch_size=32, shuffle=True)

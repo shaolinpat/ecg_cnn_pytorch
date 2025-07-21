@@ -1,4 +1,5 @@
 import argparse
+from ecg_cnn.config import PTBXL_DATA_DIR
 
 
 def parse_args():
@@ -13,6 +14,10 @@ def parse_args():
         - sample_only (bool): Whether to run on bundled 100-record sample only.
         - data_dir (str): Path to the full PTB-XL dataset directory.
         - subsample_frac (float): Fraction of data to use (e.g., 0.1 loads 10% of records).
+        - batch_size (int): Batch size for training (default=32).
+        - kernel_sizes (List[int]): Kernel sizes for each Conv1D layer.
+        - conv_dropout (float): Dropout rate after conv layers.
+        - fc_dropout (float): Dropout rate after FC layers.
 
     Notes
     -----
@@ -34,7 +39,7 @@ def parse_args():
     )
     p.add_argument(
         "--data-dir",
-        default="../data/ptbxl/physionet.org/files/ptb-xl/1.0.3",
+        default=PTBXL_DATA_DIR,
         type=str,
         help="Path to full PTB-XL data directory",
     )
@@ -44,4 +49,36 @@ def parse_args():
         default=1.0,
         help="Fraction of full data to load (for quick smoke tests)",
     )
+    p.add_argument(
+        "--batch-size",
+        type=int,
+        default=32,
+        help="Batch size for current run",
+    )
+    p.add_argument(
+        "--kernel-sizes",
+        type=positive_int,
+        nargs=3,
+        default=[16, 3, 3],
+        help="Kernel sizes for each Conv1D layer (e.g., 16 3 3)",
+    )
+    p.add_argument(
+        "--conv-dropout",
+        type=float,
+        default=0.3,
+        help="Dropout rate after conv layers (default=0.3)",
+    )
+    p.add_argument(
+        "--fc-dropout",
+        type=float,
+        default=0.5,
+        help="Dropout rate in fully connected layers (default=0.5)",
+    )
     return p.parse_args()
+
+
+def positive_int(value):
+    ivalue = int(value)
+    if ivalue <= 0:
+        raise argparse.ArgumentTypeError(f"{value} is not a positive integer")
+    return ivalue

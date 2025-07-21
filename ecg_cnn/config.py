@@ -10,7 +10,7 @@ PTBXL_DATA_DIR = (
     PROJECT_ROOT / "data" / "ptbxl" / "physionet.org" / "files" / "ptb-xl" / "1.0.3"
 )
 
-# Output folders (outside ecg_cnn/)
+# Output folders
 OUTPUT_DIR = PROJECT_ROOT / "outputs"
 PLOTS_DIR = OUTPUT_DIR / "plots"
 MODELS_DIR = OUTPUT_DIR / "models"
