@@ -5,22 +5,23 @@ channels:
 
 dependencies:
   - python=3.11
+  - cudatoolkit=11.8      # remove if CPU-only
   - pytorch
   - torchvision
   - torchaudio
-  - cudatoolkit=11.8        # Optional: remove if CPU-only
-  - scikit-learn
   - numpy
   - pandas
+  - scikit-learn
   - matplotlib
+  - seaborn
+  - wfdb
+  - tqdm
+  - jupytext
   - jupyter
   - ipykernel
-  - seaborn
   - pip
   - pip:
-      - -e ./
-      - wfdb
-      - tqdm
-      - jupytext
+      - -e .[dev]
       - pytest
       - pytest-cov
+      - coverage

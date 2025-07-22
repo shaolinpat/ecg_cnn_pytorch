@@ -4,15 +4,20 @@ version = "0.1.0"
 description = "CNN for ECG classification using PTB-XL"
 authors = [{ name = "Patrick Beach", email = "patrick.beach@gmail.com" }]
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.11"
 
 dependencies = [
     "numpy",
     "pandas",
     "scikit-learn",
-    "wfdb",
     "matplotlib",
-    "torch"
+    "torch",
+    "torchvision",
+    "torchaudio",
+    "wfdb",
+    "seaborn",
+    "tqdm",
+    "jupytext"
 ]
 
 [project.optional-dependencies]

@@ -12,22 +12,21 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
+    - name: Set up Conda and environment
+      uses: conda-incubator/setup-miniconda@v2
       with:
-        python-version: "3.11"
+        environment-file: environment.yml
+        activate-environment: ecg_cnn_env
+        python-version: 3.11
+        auto-activate-base: false
 
     - name: Install system dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y libsndfile1
 
-    - name: Install Python dependencies from pyproject.toml
-      run: |
-        python -m pip install --upgrade pip
-        pip install .[dev]
-
     - name: Run tests with coverage
+      shell: bash -l {0}
       run: |
         pytest --cov=ecg_cnn --cov-report=term --cov-report=xml
 
