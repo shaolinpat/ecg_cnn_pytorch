@@ -165,6 +165,14 @@ def build_full_X_y(meta_csv, scp_csv, ptb_path):
         Integer label array of shape (N,)
     meta_kept : pd.DataFrame
         Filtered metadata for kept records
+
+    Raises
+    ------
+    FileNotFoundError
+        If `meta_csv` or `scp_csv` is not found
+    NotADirectoryError
+        If `ptb_path` isn't a directory
+
     """
 
     print("HERE")
@@ -302,6 +310,12 @@ def aggregate_diagnostic(codes, agg_df, restrict=True):
     list of str
         A list of diagnostic superclass labels. Returns ['Unknown'] if no valid
         diagnostic class is found.
+
+    Raises
+    ------
+    ValueError
+        If `codes` is not a dictionary
+        If `agg_df` is not a pandas DataFrame
     """
 
     if not isinstance(codes, dict):
@@ -336,6 +350,11 @@ def load_ptbxl_meta(ptb_path):
     df
         A DataFrame created from 'ptbxl_database.csv' together with the column
         'diagnostic_superclass' appended.
+
+    Raises
+    ------
+    NotADirectoryError
+        If `ptb_path` is not a directory
     """
 
     # Normalize path input
@@ -394,6 +413,12 @@ def load_ptbxl_sample(sample_dir, ptb_path):
 
     sample_meta : pd.DataFrame
         Metadata for the loaded samples, including at minimum the "ecg_id" and "diagnostic_superclass" columns.
+
+    Raises
+    ------
+    NotADirectoryError
+        If `sample_dir` is not a directory
+        If `ptb_path` is not a directory
 
     Notes
     -----
@@ -580,6 +605,10 @@ def raw_to_five_class(scp_entry) -> str:
     str
         One of the five superclasses: ['CD', 'HYP', 'MI', 'NORM', 'STTC'],
         or "Unknown" if the input cannot be parsed or mapped.
+
+    Raises
+    ------
+    No raised exceptions
 
     Notes
     -----

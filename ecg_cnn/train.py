@@ -17,7 +17,7 @@ from pathlib import Path
 from sklearn.preprocessing import LabelEncoder
 from torch.utils.data import TensorDataset, DataLoader
 
-from ecg_cnn.config import PTBXL_DATA_DIR
+from ecg_cnn.config import PTBXL_DATA_DIR, MODELS_DIR
 from ecg_cnn.data.data_utils import (
     load_ptbxl_sample,
     load_ptbxl_full,
@@ -83,8 +83,21 @@ if __name__ == "__main__":
     loss = train_one_epoch(model, dataloader, optimizer, criterion, device)
     print(f"One-epoch training complete. Loss: {loss:.4f}")
 
+    MODELS_DIR.mkdir(parents=True, exist_ok=True)
+    model_path = MODELS_DIR / "ecgconvnet_one_epoch.pth"
+    torch.save(model.state_dict(), model_path)
+    print(f"Model saved to: {model_path}")
+
     # --------------------------------------------------------------------------
     # End
     # --------------------------------------------------------------------------
     elapsed = (time.time() - t0) / 60
+
+    summary_path = MODELS_DIR / "training_summary.txt"
+    with open(summary_path, "w") as f:
+        f.write(f"One-epoch training complete.\n")
+        f.write(f"Loss: {loss:.4f}\n")
+        f.write(f"Runtime: {elapsed:.2f} minutes\n")
+    print(f"Training summary saved to: {summary_path}")
+
     print(f"Total runtime: {elapsed:.2f} minutes")
