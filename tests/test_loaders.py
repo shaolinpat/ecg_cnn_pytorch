@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 from ecg_cnn.data.data_utils import load_ptbxl_full, load_ptbxl_sample
-from ecg_cnn.config import PTBXL_DATA_DIR, PROJECT_ROOT
+from ecg_cnn.paths import PTBXL_DATA_DIR, PROJECT_ROOT
 
 # Adjust these paths as needed for your environment:
 SAMPLE_DIR = PROJECT_ROOT / "data" / "sample"

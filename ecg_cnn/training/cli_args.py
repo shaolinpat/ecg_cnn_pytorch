@@ -1,5 +1,10 @@
 import argparse
-from ecg_cnn.config import PTBXL_DATA_DIR
+
+from argparse import Namespace
+
+from ecg_cnn.paths import PTBXL_DATA_DIR
+from ecg_cnn.config.config_loader import TrainConfig
+from ecg_cnn.utils.validate import validate_hparams
 
 
 def parse_args():
@@ -26,6 +31,12 @@ def parse_args():
     and smaller sample subsets for debugging or smoke testing.
     """
     p = argparse.ArgumentParser(description="Train ECG classifier")
+    p.add_argument(
+        "--model",
+        default="ECGConvNet",
+        type=str,
+        help="ML Model",
+    )
     p.add_argument(
         "--sample-dir",
         default="data/larger_sample",
@@ -57,7 +68,7 @@ def parse_args():
     )
     p.add_argument(
         "--kernel-sizes",
-        type=positive_int,
+        type=_positive_int,
         nargs=3,
         default=[16, 3, 3],
         help="Kernel sizes for each Conv1D layer (e.g., 16 3 3)",
@@ -77,8 +88,113 @@ def parse_args():
     return p.parse_args()
 
 
-def positive_int(value):
-    ivalue = int(value)
+def _positive_int(value):
+    """
+    Validate that the input value is a positive integer.
+
+    Parameters
+    ----------
+    value : str
+        Input value to validate and convert to a positive integer.
+
+    Returns
+    -------
+    int
+        Parsed positive integer.
+
+    Raises
+    ------
+    argparse.ArgumentTypeError
+        If the value is not an integer or is not greater than zero.
+
+
+    Examples
+    --------
+    >>> _positive_int("5")
+    5
+
+    >>> _positive_int("-1")
+    argparse.ArgumentTypeError: -1 is not a positive integer
+
+    >>> _positive_int("five")
+    argparse.ArgumentTypeError: five is not an integer
+    """
+    try:
+        ivalue = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{value} is not an integer")
     if ivalue <= 0:
         raise argparse.ArgumentTypeError(f"{value} is not a positive integer")
     return ivalue
+
+
+def override_config_with_args(config: TrainConfig, args: Namespace) -> TrainConfig:
+    """
+    Override fields in the configuration object using validated CLI arguments.
+
+    Parameters
+    ----------
+    config : TrainConfig
+        Training configuration object to update.
+
+    args : argparse.Namespace
+        Parsed command-line arguments (e.g., from `argparse.ArgumentParser.parse_args()`).
+
+    Returns
+    -------
+    TrainConfig
+        Updated configuration object with any CLI-specified overrides.
+
+    Raises
+    ------
+    ValueError
+        If any argument has an invalid value or type.
+    """
+    override_fields = [
+        "model",
+        "lr",
+        "batch_size",
+        "weight_decay",
+        "epochs",
+        "save_best",
+        "sample_only",
+        "subsample_frac",
+        "sampling_rate",
+        "data_dir",
+        "sample_dir",
+    ]
+
+    for field in override_fields:
+        if hasattr(args, field):
+            value = getattr(args, field)
+            if value is not None:
+                setattr(config, field, value)
+
+    # Validate core numeric and structural parameters using shared logic
+    validate_hparams(
+        lr=config.lr,
+        bs=config.batch_size,
+        wd=config.weight_decay,
+        fold=0,  # Override caller can hardcode fold if unused
+        epochs=config.epochs,
+        prefix="cli",  # Dummy string to satisfy validation
+        fname_metric=None,
+    )
+
+    # Additional checks for fields not covered by _validate_hparams
+    if not (0.0 < config.subsample_frac <= 1.0):
+        raise ValueError(
+            f"subsample_frac must be in (0.0, 1.0], got {config.subsample_frac}"
+        )
+    if config.sampling_rate not in (100, 500):
+        raise ValueError(
+            f"sampling_rate must be 100 or 500, got {config.sampling_rate}"
+        )
+    if not isinstance(config.model, str):
+        raise ValueError(f"model must be a string, got {type(config.model).__name__}")
+    if config.data_dir is not None and not isinstance(config.data_dir, str):
+        raise ValueError("data_dir must be a string or None")
+    if config.sample_dir is not None and not isinstance(config.sample_dir, str):
+        raise ValueError("sample_dir must be a string or None")
+
+    return config

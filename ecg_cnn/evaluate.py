@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import json
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -18,7 +19,7 @@ from sklearn.metrics import (
 from sklearn.preprocessing import LabelEncoder
 from torch.utils.data import TensorDataset, DataLoader
 
-from ecg_cnn.config import PTBXL_DATA_DIR, MODELS_DIR, OUTPUT_DIR
+from ecg_cnn.paths import PTBXL_DATA_DIR, MODELS_DIR, OUTPUT_DIR
 from ecg_cnn.data.data_utils import load_ptbxl_full, FIVE_SUPERCLASSES
 from ecg_cnn.models.model_utils import ECGConvNet
 from ecg_cnn.utils.plot_utils import (
@@ -35,6 +36,10 @@ torch.backends.cudnn.benchmark = False
 
 def main():
     t0 = time.time()
+
+    # Load config data
+    with open(MODELS_DIR / "ecgconvnet_one_epoch_config.json") as f:
+        config = json.load(f)
 
     # Load data
     print("Loading data for evaluation...")
@@ -77,19 +82,19 @@ def main():
             total_loss += loss.item() * y_batch.size(0)
 
             preds = outputs.argmax(dim=1)
-            all_preds.extend(preds.cpu().numpy())
+            all_preds.extend(preds.cpu().numpy().astype(int))
             all_probs.extend(probs.cpu().numpy())
-            all_targets.extend(y_batch.cpu().numpy())
+            all_targets.extend(y_batch.cpu().numpy().astype(int))
 
     avg_loss = total_loss / len(dataset)
     print(f"Eval loss: {avg_loss:.4f}")
     print(f"Evaluation completed in {(time.time() - t0) / 60:.2f} minutes.")
 
-    y_true = np.array(all_targets)
-    y_pred = np.array(all_preds)
-    y_probs = np.array(all_probs)
+    y_true = np.array(all_targets, dtype=int)
+    y_pred = np.array(all_preds, dtype=int)
+    y_probs = np.array(all_probs, dtype=np.float32)
 
-    # === Classification Report
+    # Classification Report
     print("\nClassification Report:")
     print(
         classification_report(
@@ -97,22 +102,23 @@ def main():
         )
     )
 
-    # === Confusion Matrix
+    # Confusion Matrix
     save_confusion_matrix(
-        y_true=y_true,
-        y_pred=y_pred,
+        y_true=y_true.tolist(),
+        y_pred=y_pred.tolist(),
         class_names=FIVE_SUPERCLASSES,
-        lr=0.001,
-        bs=64,
-        wd=0.0,
-        fold=0,
-        epochs=1,
-        out_folder=OUTPUT_DIR,
+        out_folder=OUTPUT_DIR / "plots",
+        lr=config["lr"],
+        bs=config["batch_size"],
+        wd=config["weight_decay"],
+        fold=config["fold"],
+        epochs=config["epochs"],
         prefix="eval",
+        fname_metric="confusion_matrix",
         normalize=True,
     )
 
-    # === Precision-Recall Curve (NORM vs ALL)
+    # Precision-Recall Curve (NORM vs ALL)
     norm_class = FIVE_SUPERCLASSES.index("NORM")
     y_true_binary = (y_true == norm_class).astype(int)
     y_probs_binary = y_probs[:, norm_class]
@@ -122,6 +128,28 @@ def main():
         y_probs=y_probs_binary,
         out_path=OUTPUT_DIR / "plots" / "threshold_pr_norm_vs_all.png",
         title="Precision & Recall vs Threshold (NORM vs Rest)",
+    )
+
+    # === Demo Curve Plot (Fake Loss over Epochs)
+    train_loss = [1.5 - 0.1 * i for i in range(10)]
+    val_loss = [1.6 - 0.08 * i for i in range(10)]
+
+    from ecg_cnn.utils.plot_utils import save_plot_curves
+
+    save_plot_curves(
+        x_vals=list(range(1, 11)),
+        y_vals=val_loss,
+        x_label="Epoch",
+        y_label="Loss",
+        title_metric="Validation Loss Curve",
+        out_folder=OUTPUT_DIR / "plots",
+        lr=0.001,
+        bs=64,
+        wd=0.0,
+        fold=0,
+        epochs=10,
+        prefix="eval",
+        fname_metric="loss",
     )
 
 

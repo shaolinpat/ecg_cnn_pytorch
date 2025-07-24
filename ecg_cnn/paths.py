@@ -15,3 +15,6 @@ OUTPUT_DIR = PROJECT_ROOT / "outputs"
 PLOTS_DIR = OUTPUT_DIR / "plots"
 MODELS_DIR = OUTPUT_DIR / "models"
 RESULTS_CSV = OUTPUT_DIR / "results" / "results_summary_pytorch.csv"
+
+# Path to the default training configuration
+DEFAULT_TRAINING_CONFIG = PROJECT_ROOT / "configs" / "baseline.yaml"

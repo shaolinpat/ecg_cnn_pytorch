@@ -492,7 +492,7 @@ def load_ptbxl_full(data_dir, subsample_frac, sampling_rate=100):
     """
     Load all PTB-XL ECG records from the given directory, with optional subsampling.
 
-    This function loads the signal data for all ECG records listed in the PTB-XL metadata
+    This function loads signal data for all ECG records listed in the PTB-XL metadata
     file located in `data_dir`. You may subsample the data for quick experimentation.
 
     Parameters
@@ -531,10 +531,16 @@ def load_ptbxl_full(data_dir, subsample_frac, sampling_rate=100):
 
     Notes
     -----
-    - This function assumes that waveform files are stored using PhysioNet naming conventions.
-    - Label mapping is handled by an external helper function: `raw_to_five_class()`.
+    - The metadata is loaded via `load_ptbxl_meta(data_dir)`, and must contain the proper
+      columns (`filename_lr` or `filename_hr`, and `scp_codes`).
+    - Metadata is loaded via `load_ptbxl_meta()` and filtered to match valid ECGs.
+    - Reproducible subsampling is done using SEED = 22 before loading files.
+    - Label mapping is handled by an external helper: `raw_to_five_class()`.
+    - Reproducible subsampling is achieved using global SEED = 22.
     """
+    SEED = 22
 
+    print("Fuck ChatGPT")
     # Normalize and validate inputs
     data_dir = Path(data_dir)
     if not data_dir.is_dir():
@@ -547,21 +553,24 @@ def load_ptbxl_full(data_dir, subsample_frac, sampling_rate=100):
         raise ValueError(f"sampling_rate must be 100 or 500, got {sampling_rate}")
 
     meta_df = load_ptbxl_meta(data_dir)
-
     col = "filename_lr" if sampling_rate == 100 else "filename_hr"
+    filenames = meta_df[col].tolist()
+    ecg_ids = meta_df.index.tolist()
 
-    recs = meta_df[col].unique().tolist()
-
+    print(subsample_frac)
     if subsample_frac < 1.0:
+        print("HERE")
         np.random.seed(SEED)
-        recs = list(
-            np.random.choice(recs, int(len(recs) * subsample_frac), replace=False)
+        idx = np.random.choice(
+            len(ecg_ids), int(len(ecg_ids) * subsample_frac), replace=False
         )
+        ecg_ids = [ecg_ids[i] for i in idx]
+        filenames = [filenames[i] for i in idx]
 
     ids = []
     X_list = []
 
-    for rec in recs:
+    for ecg_id, rec in zip(ecg_ids, filenames):
         full_path = data_dir / rec
 
         try:
@@ -571,10 +580,6 @@ def load_ptbxl_full(data_dir, subsample_frac, sampling_rate=100):
             continue
 
         X_list.append(signal.T)
-
-        parts = rec.split("/")  # ["records100", "00000", "00017_lr"]
-        filename = parts[2]  # "00017_lr"
-        ecg_id = int(filename.split("_")[0])  # -> 17
         ids.append(ecg_id)
 
     if not X_list:
@@ -586,6 +591,8 @@ def load_ptbxl_full(data_dir, subsample_frac, sampling_rate=100):
     # Derive y from raw scp_codes via your mapping helper
     y = [raw_to_five_class(s) for s in full_meta["scp_codes"]]
 
+    print(full_meta.shape)
+    print(f"Loaded {len(ids)} records after subsampling.")
     return X, y, full_meta
 
 
