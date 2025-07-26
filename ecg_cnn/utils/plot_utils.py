@@ -22,16 +22,23 @@ from ecg_cnn.utils.validate import validate_hparams
 # ------------------------------------------------------------------------------
 
 
-def _build_plot_title(metric: str, lr: float, bs: int, wd: float, fold: int) -> str:
+def _build_plot_title(
+    model: str,
+    lr: float,
+    bs: int,
+    wd: float,
+    fold: int,
+    metric: str,
+) -> str:
     """
     Construct a standardized plot title including key hyperparameters.
 
     Format:
-        "<metric> by Epoch\nLR=<lr>, BS=<bs>, WD=<wd>, Fold=<fold>"
+        "<model>: <metric> by Epoch\nLR=<lr>, BS=<bs>, WD=<wd>, Fold=<fold>"
 
     Parameters
     ----------
-    metric : str
+    Model : str
         Descriptive title for the metric being plotted (e.g., "Accuracy", "Loss").
     lr : float
         Learning rate. Must be in range [1e-6, 1.0].
@@ -41,6 +48,8 @@ def _build_plot_title(metric: str, lr: float, bs: int, wd: float, fold: int) -> 
         Weight decay. Must be in range [0.0, 1.0].
     fold : int
         Cross-validation fold number. Must be a non-negative integer.
+    metric : str
+        Descriptive title for the metric being plotted (e.g., "Accuracy", "Loss").
 
     Returns
     -------
@@ -54,9 +63,16 @@ def _build_plot_title(metric: str, lr: float, bs: int, wd: float, fold: int) -> 
     """
     # Reuse centralized validation logic (dummy value for epochs, prefix)
     validate_hparams(
-        lr=lr, bs=bs, wd=wd, fold=fold, epochs=1, prefix="fake", fname_metric=metric
+        model=model,
+        lr=lr,
+        bs=bs,
+        wd=wd,
+        fold=fold,
+        epochs=1,
+        prefix="fake",
+        fname_metric=metric,
     )
-    return f"{metric} by Epoch\nLR={lr}, BS={bs}, WD={wd}, Fold={fold}"
+    return f"{model}: {metric} by Epoch\nLR={lr}, BS={bs}, WD={wd}, Fold={fold}"
 
 
 # ------------------------------------------------------------------------------
@@ -64,10 +80,11 @@ def _build_plot_title(metric: str, lr: float, bs: int, wd: float, fold: int) -> 
 # save_confusion_matrix, etc.)
 # ------------------------------------------------------------------------------
 def format_hparams(
+    *,
+    model: str,
     lr: float,
     bs: int,
     wd: float,
-    *,
     epochs: int,
     prefix: str,
     fname_metric: str = "",
@@ -83,6 +100,8 @@ def format_hparams(
 
     Parameters
     ----------
+    model :str
+        Model string indicates model used.
     lr : float
         Learning rate. Must be in range [1e-6, 1.0].
     bs : int
@@ -113,6 +132,7 @@ def format_hparams(
     """
     # will raise an error if the params are out of spec
     validate_hparams(
+        model=model,
         lr=lr,
         bs=bs,
         wd=wd,
@@ -130,13 +150,30 @@ def format_hparams(
         return trimmed or "0"
 
     # --- Build filename ---
-    lr_str = _trim(lr)
-    wd_str = _trim(wd)
-    prefix = prefix.lower()
-    metric_part = f"_{fname_metric.lower()}" if fname_metric else ""
-    return (
-        f"{prefix}{metric_part}_lr{lr_str}_bs{bs}_wd{wd_str}_fold{fold}_epoch{epochs}"
-    )
+
+    # lr_str = _trim(lr)
+    # wd_str = _trim(wd)
+    # prefix = prefix.lower()
+    # metric_part = f"_{fname_metric.lower()}" if fname_metric else ""
+
+    parts = [prefix.lower()]
+    if fname_metric:
+        parts.append(fname_metric.lower())
+    if model:
+        parts.append(model)
+    parts.append(f"lr{_trim(lr)}")
+    parts.append(f"bs{bs}")
+    parts.append(f"wd{_trim(wd)}")
+    if fold is not None:
+        parts.append(f"fold{fold}")
+    if epochs is not None:
+        parts.append(f"epoch{epochs}")
+
+    # return (
+    #     f"{prefix}{metric_part}_{model}_lr{lr_str}_bs{bs}_wd{wd_str}_fold{fold}_epoch{epochs}"
+    # )
+
+    return "_".join(parts)
 
 
 def save_plot_curves(
@@ -146,6 +183,7 @@ def save_plot_curves(
     y_label: str,
     title_metric: str,
     out_folder: str | Path,
+    model: str,
     lr: float,
     bs: int,
     wd: float,
@@ -226,6 +264,7 @@ def save_plot_curves(
     # Set filename. format_hparams calls _validates_hparams which validates
     # these parameters
     filename = format_hparams(
+        model=model,
         lr=lr,
         bs=bs,
         wd=wd,
@@ -238,7 +277,7 @@ def save_plot_curves(
     path.parent.mkdir(parents=True, exist_ok=True)
 
     # --- Plot and save ---
-    title = _build_plot_title(title_metric, lr, bs, wd, fold)
+    title = _build_plot_title(model, lr, bs, wd, fold, title_metric)
 
     fig, ax = plt.subplots()
     ax.plot(x_vals, label="Training")
@@ -259,6 +298,7 @@ def save_confusion_matrix(
     y_pred: list[int],
     class_names: list[str],
     out_folder: str | Path,
+    model: str,
     lr: float,
     bs: int,
     wd: float,
@@ -282,6 +322,8 @@ def save_confusion_matrix(
         List of class labels (e.g., ["NORM", "MI", "STTC", ...]).
     out_folder : str or Path
         Destination folder where the plot will be saved.
+    model : str
+        Model string indicates model used.
     lr : float
         Learning rate. Must be in range [1e-6, 1.0].
     bs : int
@@ -346,12 +388,23 @@ def save_confusion_matrix(
         values_format=".2f" if normalize else "d",
     )
 
-    title = "Normalized Confusion Matrix" if normalize else "Confusion Matrix"
-    plot_title = f"{title}\nLR={lr}, BS={bs}, WD={wd}, Fold={fold}"
+    title = (
+        f"{model} -- Normalized Confusion Matrix"
+        if normalize
+        else f"{model} -- Confusion Matrix"
+    )
+
+    plot_title = (
+        f"{title}\nLR={lr}, BS={bs}, WD={wd}"
+        + (f", Fold={fold}" if fold is not None else "")
+        + (f", Epoch={epochs}" if epochs is not None else "")
+    )
+
     cm.ax_.set_title(plot_title)
 
     # Save figure
     filename = format_hparams(
+        model=model,
         lr=lr,
         bs=bs,
         wd=wd,
@@ -370,6 +423,7 @@ def save_pr_threshold_curve(
     y_true: list[int] | np.ndarray,
     y_probs: list[float] | np.ndarray,
     out_folder: str | Path,
+    model: str,
     lr: float,
     bs: int,
     wd: float,
@@ -390,6 +444,8 @@ def save_pr_threshold_curve(
         Predicted probabilities for the positive class.
     out_folder : str or Path
         Output folder to save the plot.
+    model : str
+        Model string indicates model used.
     lr : float
         Learning rate. Must be in range [1e-6, 1.0].
     bs : int
@@ -436,6 +492,7 @@ def save_pr_threshold_curve(
         raise ValueError("out_folder must be a string or pathlib.Path")
 
     validate_hparams(
+        model=model,
         lr=lr,
         bs=bs,
         wd=wd,
@@ -450,6 +507,7 @@ def save_pr_threshold_curve(
     out_folder.mkdir(parents=True, exist_ok=True)
 
     filename = format_hparams(
+        model=model,
         lr=lr,
         bs=bs,
         wd=wd,
@@ -486,6 +544,7 @@ def save_classification_report(
     y_pred: list[int] | np.ndarray,
     class_names: list[str],
     out_folder: str | Path,
+    model: str,
     lr: float,
     bs: int,
     wd: float,
@@ -508,6 +567,8 @@ def save_classification_report(
         List of class names corresponding to label indices.
     out_folder : str or Path
         Folder to save the output files.
+    model : str
+        Model string indicates model used.
     lr : float
         Learning rate. Must be in range [1e-6, 1.0].
     bs : int
@@ -555,6 +616,7 @@ def save_classification_report(
         raise ValueError("out_folder must be a string or pathlib.Path")
 
     validate_hparams(
+        model=model,
         lr=lr,
         bs=bs,
         wd=wd,
@@ -568,6 +630,7 @@ def save_classification_report(
     out_folder = Path(out_folder)
     out_folder.mkdir(parents=True, exist_ok=True)
     fname = format_hparams(
+        model=model,
         lr=lr,
         bs=bs,
         wd=wd,
@@ -619,6 +682,7 @@ def evaluate_and_plot(
     val_accs: list[float],
     train_losses: list[float],
     val_losses: list[float],
+    model: str,
     lr: float,
     bs: int,
     wd: float,
@@ -646,6 +710,8 @@ def evaluate_and_plot(
         Training loss values per epoch.
     val_losses : list of float
         Validation loss values per epoch.
+    model : str
+        Model string indicates model used.
     lr : float
         Learning rate used during training.
     bs : int
@@ -703,7 +769,7 @@ def evaluate_and_plot(
     out_folder = Path(out_folder)
 
     print(
-        f"\n=== Final Evaluation (LR={lr}, BS={bs}, Fold={fold}, Epochs={epochs}) ==="
+        f"\n=== Final Evaluation (Model={model}, LR={lr}, BS={bs}, Fold={fold}, Epochs={epochs}) ==="
     )
 
     # --- Validate train/val metrics ---
@@ -734,6 +800,7 @@ def evaluate_and_plot(
         y_pred=y_pred,
         class_names=class_names,
         out_folder=report_dir,
+        model=model,
         lr=lr,
         bs=bs,
         wd=wd,
@@ -752,6 +819,7 @@ def evaluate_and_plot(
         x_label="Epoch",
         y_label="Accuracy",
         title_metric="Accuracy",
+        model=model,
         lr=lr,
         bs=bs,
         wd=wd,
@@ -769,6 +837,7 @@ def evaluate_and_plot(
         x_label="Epoch",
         y_label="Loss",
         title_metric="Loss",
+        model=model,
         lr=lr,
         bs=bs,
         wd=wd,
@@ -785,6 +854,7 @@ def evaluate_and_plot(
         y_pred=y_pred,
         class_names=class_names,
         out_folder=plot_dir,
+        model=model,
         lr=lr,
         bs=bs,
         wd=wd,

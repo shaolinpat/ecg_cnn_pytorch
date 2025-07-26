@@ -2,6 +2,8 @@
 # Shared validation for common hyperparameters
 # ------------------------------------------------------------------------------
 def validate_hparams(
+    *,
+    model: str,
     lr: float,
     bs: int,
     wd: float,
@@ -39,6 +41,8 @@ def validate_hparams(
     ValueError
         If any of the provided values are of incorrect type or out of valid range.
     """
+    if not isinstance(model, str):
+        raise ValueError(f"Model must be a non-empty string. Got: {model!r}")
     if not isinstance(lr, (float, int)) or not (1e-6 <= lr <= 1.0):
         raise ValueError(
             f"Learning rate must be positive int or float in range [1e-6, 1.0]. Got: {lr}"

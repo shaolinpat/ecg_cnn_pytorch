@@ -121,14 +121,15 @@ def main():
         y_pred=y_pred.tolist(),
         class_names=FIVE_SUPERCLASSES,
         out_folder=OUTPUT_DIR / "plots",
+        model=config.model,
         lr=config.lr,
         bs=config.batch_size,
         wd=config.weight_decay,
-        fold=config["fold"],
-        epochs=config["epochs"],
+        epochs=config.epochs,
         prefix="eval",
         fname_metric="confusion_matrix",
         normalize=True,
+        fold=1,
     )
 
     # Precision-Recall Curve (NORM vs ALL)

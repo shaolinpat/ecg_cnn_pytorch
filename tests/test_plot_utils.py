@@ -22,6 +22,7 @@ from ecg_cnn.utils.validate import validate_hparams
 # ------------------------------------------------------------------------------
 def default_hparam_kwargs():
     return dict(
+        model="SomeModel",
         lr=0.001,
         bs=64,
         wd=0.0,
@@ -39,22 +40,29 @@ def default_hparam_kwargs():
 
 
 def test_build_plot_title_valid():
-    result = _build_plot_title(metric="Accuracy", lr=0.001, bs=32, wd=0.01, fold=2)
-    assert result == "Accuracy by Epoch\nLR=0.001, BS=32, WD=0.01, Fold=2"
+    result = _build_plot_title(
+        model="SomeModel", lr=0.001, bs=32, wd=0.01, fold=2, metric="Accuracy"
+    )
+    assert result == "SomeModel: Accuracy by Epoch\nLR=0.001, BS=32, WD=0.01, Fold=2"
 
 
 def test_build_plot_title_invalid_lr():
     with pytest.raises(ValueError, match="Learning rate must be positive"):
-        _build_plot_title(metric="Accuracy", lr=-0.001, bs=32, wd=0.01, fold=2)
+        _build_plot_title(
+            model="SomeModel", lr=-0.001, bs=32, wd=0.01, fold=2, metric="Accuracy"
+        )
 
 
 def test_build_plot_title_invalid_metric_type():
     with pytest.raises(ValueError, match="Metric name must be a string"):
-        _build_plot_title(metric=123, lr=0.001, bs=32, wd=0.01, fold=2)
+        _build_plot_title(
+            model="SomeModel", lr=0.001, bs=32, wd=0.01, fold=2, metric=123
+        )
 
 
 # ------------------------------------------------------------------------------
 # def format_hparams(
+#     model: str,
 #     lr: float,
 #     bs: int,
 #     wd: float,
@@ -66,13 +74,20 @@ def test_build_plot_title_invalid_metric_type():
 # ------------------------------------------------------------------------------
 def test_format_hparams_lr_many_decimal_places():
     result = format_hparams(
-        lr=0.0001234567, bs=32, wd=0.0009876543, fold=2, epochs=3, prefix="final"
+        model="SomeModel",
+        lr=0.0001234567,
+        bs=32,
+        wd=0.0009876543,
+        fold=2,
+        epochs=3,
+        prefix="final",
     )
     assert "lr000123" in result and "wd000988" in result
 
 
 def test_format_hparams_basic():
     result = format_hparams(
+        model="SomeModel",
         lr=0.001,
         bs=32,
         wd=0.0001,
@@ -81,11 +96,12 @@ def test_format_hparams_basic():
         prefix="final",
         fname_metric="accuracy",
     )
-    assert result == "final_accuracy_lr001_bs32_wd0001_fold2_epoch3"
+    assert result == "final_accuracy_SomeModel_lr001_bs32_wd0001_fold2_epoch3"
 
 
 def test_format_hparams_no_metric():
     result = format_hparams(
+        model="SomeModel",
         lr=0.001,
         bs=32,
         wd=0.0001,
@@ -93,11 +109,12 @@ def test_format_hparams_no_metric():
         epochs=3,
         prefix="best",
     )
-    assert result == "best_lr001_bs32_wd0001_fold2_epoch3"
+    assert result == "best_SomeModel_lr001_bs32_wd0001_fold2_epoch3"
 
 
 def test_format_hparams_trim_zeros():
     result = format_hparams(
+        model="SomeModel",
         lr=0.00100,
         bs=32,
         wd=0.000100,
@@ -105,88 +122,166 @@ def test_format_hparams_trim_zeros():
         epochs=3,
         prefix="best",
     )
-    assert result == "best_lr001_bs32_wd0001_fold2_epoch3"
+    assert result == "best_SomeModel_lr001_bs32_wd0001_fold2_epoch3"
 
 
 def test_format_hparams_lr_bottom_range_ok():
     result = format_hparams(
-        lr=0.000001, bs=128, wd=1, fold=1, epochs=5, prefix="test", fname_metric="loss"
+        model="SomeModel",
+        lr=0.000001,
+        bs=128,
+        wd=1,
+        fold=1,
+        epochs=5,
+        prefix="test",
+        fname_metric="loss",
     )
     assert "_lr000001_" in result
 
 
 def test_format_hparams_lr_top_range_ok_int():
     result = format_hparams(
-        lr=1, bs=128, wd=1, fold=1, epochs=5, prefix="test", fname_metric="loss"
+        model="SomeModel",
+        lr=1,
+        bs=128,
+        wd=1,
+        fold=1,
+        epochs=5,
+        prefix="test",
+        fname_metric="loss",
     )
     assert "_lr1_" in result
 
 
 def test_format_hparams_lr_top_range_ok_float():
     result = format_hparams(
-        lr=1.0, bs=128, wd=1, fold=1, epochs=5, prefix="test", fname_metric="loss"
+        model="SomeModel",
+        lr=1.0,
+        bs=128,
+        wd=1,
+        fold=1,
+        epochs=5,
+        prefix="test",
+        fname_metric="loss",
     )
     assert "_lr1_" in result
 
 
 def test_format_hparams_bs_bottom_range():
     result = format_hparams(
-        lr=0.001, bs=1, wd=0.0, fold=1, epochs=5, prefix="test", fname_metric="loss"
+        model="SomeModel",
+        lr=0.001,
+        bs=1,
+        wd=0.0,
+        fold=1,
+        epochs=5,
+        prefix="test",
+        fname_metric="loss",
     )
     assert "_bs1_" in result
 
 
 def test_format_hparams_bs_top_range():
     result = format_hparams(
-        lr=0.001, bs=4096, wd=0.0, fold=1, epochs=5, prefix="test", fname_metric="loss"
+        model="SomeModel",
+        lr=0.001,
+        bs=4096,
+        wd=0.0,
+        fold=1,
+        epochs=5,
+        prefix="test",
+        fname_metric="loss",
     )
     assert "_bs4096_" in result
 
 
 def test_format_hparams_wd_zero_ok():
     result = format_hparams(
-        lr=0.001, bs=128, wd=0.0, fold=1, epochs=5, prefix="test", fname_metric="loss"
+        model="SomeModel",
+        lr=0.001,
+        bs=128,
+        wd=0.0,
+        fold=1,
+        epochs=5,
+        prefix="test",
+        fname_metric="loss",
     )
     assert "_wd0_" in result
 
 
 def test_format_hparams_wd_one_ok():
     result = format_hparams(
-        lr=0.001, bs=128, wd=1.0, fold=1, epochs=5, prefix="test", fname_metric="loss"
+        model="SomeModel",
+        lr=0.001,
+        bs=128,
+        wd=1.0,
+        fold=1,
+        epochs=5,
+        prefix="test",
+        fname_metric="loss",
     )
     assert "_wd1_" in result
 
 
 def test_format_hparams_wd_zero_int_ok():
     result = format_hparams(
-        lr=0.001, bs=128, wd=0, fold=1, epochs=5, prefix="test", fname_metric="loss"
+        model="SomeModel",
+        lr=0.001,
+        bs=128,
+        wd=0,
+        fold=1,
+        epochs=5,
+        prefix="test",
+        fname_metric="loss",
     )
     assert "_wd0_" in result
 
 
 def test_format_hparams_wd_one_int_ok():
     result = format_hparams(
-        lr=0.001, bs=128, wd=1, fold=1, epochs=5, prefix="test", fname_metric="loss"
+        model="SomeModel",
+        lr=0.001,
+        bs=128,
+        wd=1,
+        fold=1,
+        epochs=5,
+        prefix="test",
+        fname_metric="loss",
     )
     assert "_wd1_" in result
 
 
 def test_format_hparams_fold_zero():
     result = format_hparams(
-        lr=0.001, bs=128, wd=0.1, fold=0, epochs=5, prefix="test", fname_metric="loss"
+        model="SomeModel",
+        lr=0.001,
+        bs=128,
+        wd=0.1,
+        fold=0,
+        epochs=5,
+        prefix="test",
+        fname_metric="loss",
     )
     assert "_fold0_" in result
 
 
 def test_format_hparams_epochs_bottom_of_range():
     result = format_hparams(
-        lr=0.001, bs=128, wd=0.1, fold=0, epochs=1, prefix="test", fname_metric="loss"
+        model="SomeModel",
+        lr=0.001,
+        bs=128,
+        wd=0.1,
+        fold=0,
+        epochs=1,
+        prefix="test",
+        fname_metric="loss",
     )
     assert "_epoch1" in result
 
 
 def test_format_hparams_epochs_top_of_range():
     result = format_hparams(
+        model="SomeModel",
         lr=0.001,
         bs=128,
         wd=0.1,
@@ -200,26 +295,50 @@ def test_format_hparams_epochs_top_of_range():
 
 def test_format_hparams_prefix_lower_cased():
     result = format_hparams(
-        lr=0.001, bs=128, wd=0.1, fold=0, epochs=1, prefix="TEST", fname_metric="loss"
+        model="SomeModel",
+        lr=0.001,
+        bs=128,
+        wd=0.1,
+        fold=0,
+        epochs=1,
+        prefix="TEST",
+        fname_metric="loss",
     )
     assert "test_loss" in result
 
 
 def test_format_hparams_fname_metric_empty_string_ok():
     result = format_hparams(
-        lr=0.001, bs=128, wd=0.1, fold=0, epochs=1, prefix="test", fname_metric=""
+        model="SomeModel",
+        lr=0.001,
+        bs=128,
+        wd=0.1,
+        fold=0,
+        epochs=1,
+        prefix="test",
+        fname_metric="",
     )
-    assert "test_lr" in result
+    assert "SomeModel_lr" in result
 
 
 def test_format_hparams_fname_metric_missing_ok():
-    result = format_hparams(lr=0.001, bs=128, wd=0.1, fold=0, epochs=1, prefix="test")
-    assert "test_lr" in result
+    result = format_hparams(
+        model="SomeModel", lr=0.001, bs=128, wd=0.1, fold=0, epochs=1, prefix="test"
+    )
+    print(result)
+    assert "SomeModel_lr" in result
 
 
 def test_format_hparams_fname_metric_lower_cased():
     result = format_hparams(
-        lr=0.001, bs=128, wd=0.1, fold=0, epochs=1, prefix="test", fname_metric="LOSS"
+        model="SomeModel",
+        lr=0.001,
+        bs=128,
+        wd=0.1,
+        fold=0,
+        epochs=1,
+        prefix="test",
+        fname_metric="LOSS",
     )
     assert "test_loss" in result
 
@@ -232,6 +351,7 @@ def test_format_hparams_keyword_only():
 
     # Valid usage (all keyword arguments)
     result = format_hparams(
+        model="SomeModel",
         lr=0.001,
         bs=64,
         wd=0.0,
@@ -241,11 +361,10 @@ def test_format_hparams_keyword_only():
         fold=1,
     )
     assert isinstance(result, str)
-    assert result.startswith("test_metric_lr001_bs64")
+    assert result.startswith("test_metric_SomeModel_lr001_bs64")
 
     # Invalid usage: positional argument where keyword is required
     with pytest.raises(TypeError):
-        # Here, 10 is passed as positional argument for `epochs`, which is keyword-only
         format_hparams(0.001, 64, 0.0, 10, "test", "metric", 1)
 
 
@@ -897,6 +1016,7 @@ def test_evaluate_and_plot_success(tmp_path):
 
     # evaluate_and_plot() hard-codes fname_metric="classification_report" for the report
     report_fname = format_hparams(
+        model=hparams["model"],
         lr=hparams["lr"],
         bs=hparams["bs"],
         wd=hparams["wd"],

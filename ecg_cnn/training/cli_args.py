@@ -242,17 +242,9 @@ def override_config_with_args(config: TrainConfig, args: Namespace) -> TrainConf
             if value is not None:
                 setattr(config, field, value)
 
-    # for field in override_fields:
-    #     if not hasattr(args, field):
-    #         continue
-
-    #     value = getattr(args, field)
-
-    #     if value is not None:
-    #         setattr(config, field, value)
-
     # Validate core numeric and structural parameters using shared logic
     validate_hparams(
+        model=config.model,
         lr=config.lr,
         bs=config.batch_size,
         wd=config.weight_decay,
@@ -271,8 +263,8 @@ def override_config_with_args(config: TrainConfig, args: Namespace) -> TrainConf
         raise ValueError(
             f"sampling_rate must be 100 or 500, got {config.sampling_rate}"
         )
-    if not isinstance(config.model, str):
-        raise ValueError(f"model must be a string, got {type(config.model).__name__}")
+    if not isinstance(config.model, str) or not config.model.strip():
+        raise ValueError(f"model must be a non-empty string, got: {repr(config.model)}")
     if config.data_dir is not None and not isinstance(config.data_dir, (str, Path)):
         raise ValueError(
             f"data_dir must be a string, Path, or None, got {type(config.data_dir).__name__}"

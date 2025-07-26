@@ -192,7 +192,7 @@ def make_min_config(**overrides):
     return TrainConfig(**defaults)
 
 
-def test_override_config_with_valid_args():
+def test_override_config_with_args_with_valid_args():
     config = make_min_config()
     args = Namespace(
         model="ECGConvNetPlus",
@@ -221,28 +221,28 @@ def test_override_config_with_valid_args():
     assert updated.sample_dir == "/new/samples"
 
 
-def test_override_config_ignores_none_values():
+def test_override_config_with_args_ignores_none_values():
     config = make_min_config(batch_size=64)
     args = Namespace(batch_size=None)
     updated = override_config_with_args(config, args)
     assert updated.batch_size == 64
 
 
-def test_override_config_invalid_subsample_frac():
+def test_override_config_with_args_invalid_subsample_frac():
     config = make_min_config()
     args = Namespace(subsample_frac=1.5)
     with pytest.raises(ValueError, match="subsample_frac must be in"):
         override_config_with_args(config, args)
 
 
-def test_override_config_invalid_sampling_rate():
+def test_override_config_with_args_invalid_sampling_rate():
     config = make_min_config()
     args = Namespace(sampling_rate=250)
     with pytest.raises(ValueError, match="sampling_rate must be 100 or 500"):
         override_config_with_args(config, args)
 
 
-def test_override_config_rejects_nonstring_model():
+def test_override_config_with_args_rejects_nonstring_model():
     config = TrainConfig(
         model=["ECGConvNet"],  # Invalid: not a string
         lr=0.001,
@@ -269,11 +269,11 @@ def test_override_config_rejects_nonstring_model():
         data_dir=None,
         sample_dir=None,
     )
-    with pytest.raises(ValueError, match="model must be a string"):
+    with pytest.raises(ValueError, match="Model must be a non-empty string"):
         override_config_with_args(config, dummy_args)
 
 
-def test_override_config_accepts_none_data_dir_and_sample_dir():
+def test_override_config_with_args_accepts_none_data_dir_and_sample_dir():
     config = TrainConfig(
         model="ECGConvNet",
         lr=0.001,
@@ -314,7 +314,7 @@ def test_override_config_accepts_none_data_dir_and_sample_dir():
     assert updated.sample_dir == None
 
 
-def test_override_config_rejects_nonstring_data_dir():
+def test_override_config_with_args_rejects_nonstring_data_dir():
     config = TrainConfig(
         model="ECGConvNet",
         lr=0.001,
@@ -345,7 +345,7 @@ def test_override_config_rejects_nonstring_data_dir():
         override_config_with_args(config, dummy_args)
 
 
-def test_override_config_rejects_nonstring_sample_dir():
+def test_override_config_with_args_rejects_nonstring_sample_dir():
     config = TrainConfig(
         model="ECGConvNet",
         lr=0.001,
@@ -377,7 +377,7 @@ def test_override_config_rejects_nonstring_sample_dir():
         override_config_with_args(config, dummy_args)
 
 
-def test_override_config_rejects_non_boolean_verbose():
+def test_override_confi_with_args_rejects_non_boolean_verbose():
     config = TrainConfig(
         model="ECGConvNet",
         lr=0.001,
@@ -487,3 +487,69 @@ def test_override_config_with_args_applies_correctly(cli_args, expected_override
             assert getattr(updated, key) == getattr(
                 base_config, key
             ), f"{key} unexpectedly changed"
+
+
+def test_override_config_with_args_rejects_empty_model():
+    config = TrainConfig(
+        model="",
+        lr=0.001,
+        batch_size=64,
+        weight_decay=0.0,
+        epochs=10,
+        save_best=True,
+        sample_only=False,
+        subsample_frac=1.0,
+        sampling_rate=100,
+        data_dir="test",
+        sample_dir="/sample",
+        verbose="true",
+    )
+    dummy_args = argparse.Namespace(
+        model=None,
+        lr=None,
+        batch_size=None,
+        weight_decay=None,
+        epochs=None,
+        save_best=None,
+        sample_only=None,
+        subsample_frac=None,
+        sampling_rate=None,
+        data_dir=None,
+        sample_dir=None,
+        verbose=None,
+    )
+    with pytest.raises(ValueError, match="model must be a non-empty string"):
+        override_config_with_args(config, dummy_args)
+
+
+def test_override_config_with_args_rejects_model_with_blankd_name():
+    config = TrainConfig(
+        model="  ",
+        lr=0.001,
+        batch_size=64,
+        weight_decay=0.0,
+        epochs=10,
+        save_best=True,
+        sample_only=False,
+        subsample_frac=1.0,
+        sampling_rate=100,
+        data_dir="test",
+        sample_dir="/sample",
+        verbose="true",
+    )
+    dummy_args = argparse.Namespace(
+        model=None,
+        lr=None,
+        batch_size=None,
+        weight_decay=None,
+        epochs=None,
+        save_best=None,
+        sample_only=None,
+        subsample_frac=None,
+        sampling_rate=None,
+        data_dir=None,
+        sample_dir=None,
+        verbose=None,
+    )
+    with pytest.raises(ValueError, match="model must be a non-empty string"):
+        override_config_with_args(config, dummy_args)
