@@ -16,22 +16,32 @@ from ecg_cnn.utils.validate import validate_hparams
 
 def test_validate_hparams_all_valid_minimal():
     # Should not raise
-    validate_hparams(0.001, 32, 0.01, 0, 10, "test")
+    validate_hparams(0.001, 32, 0.01, 10, "test", fold=0)
 
 
 def test_validate_hparams_all_valid_full():
     # Should not raise
-    validate_hparams(0.001, 32, 0.01, 1, 100, "test", fname_metric="loss")
+    validate_hparams(0.001, 32, 0.01, 100, "test", fname_metric="loss", fold=0)
 
 
 def test_validate_hparams_all_valid_full_fname_metric_none():
     # Should not raise
-    validate_hparams(0.001, 32, 0.01, 1, 100, "test", fname_metric=None)
+    validate_hparams(0.001, 32, 0.01, 100, "test", fname_metric=None, fold=1)
 
 
 def test_validate_hparams_all_valid_full_fname_metric_spaces_only():
     # Should not raise
-    validate_hparams(0.001, 32, 0.01, 1, 100, "test", fname_metric="   ")
+    validate_hparams(0.001, 32, 0.01, 100, "test", fname_metric="   ", fold=44)
+
+
+def test_validate_hparams_all_valid_full_fold_none():
+    # Should not raise
+    validate_hparams(0.001, 32, 0.01, 1000, "test", fname_metric="loss", fold=None)
+
+
+def test_validate_hparams_all_valid_full_fold_validly_missing():
+    # Should not raise
+    validate_hparams(lr=0.001, bs=32, wd=0.0001, epochs=3, prefix="good")
 
 
 def test_validate_hparams_lr_not_int_or_float():

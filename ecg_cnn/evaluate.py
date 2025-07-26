@@ -12,22 +12,29 @@ import torch.nn as nn
 from pathlib import Path
 from sklearn.metrics import (
     classification_report,
-    confusion_matrix,
-    precision_recall_curve,
-    average_precision_score,
 )
 from sklearn.preprocessing import LabelEncoder
 from torch.utils.data import TensorDataset, DataLoader
 
-from ecg_cnn.paths import PTBXL_DATA_DIR, MODELS_DIR, OUTPUT_DIR
+
+from ecg_cnn.config.config_loader import load_training_config
 from ecg_cnn.data.data_utils import load_ptbxl_full, FIVE_SUPERCLASSES
 from ecg_cnn.models.model_utils import ECGConvNet
+from ecg_cnn.paths import (
+    DEFAULT_TRAINING_CONFIG,
+    MODELS_DIR,
+    OUTPUT_DIR,
+    PROJECT_ROOT,
+    PTBXL_DATA_DIR,
+)
+from ecg_cnn.training.cli_args import parse_args
 from ecg_cnn.utils.plot_utils import (
     save_pr_threshold_curve,
     save_confusion_matrix,
 )
 
 SEED = 22
+verbose = True
 torch.manual_seed(SEED)
 np.random.seed(SEED)
 torch.backends.cudnn.deterministic = True
@@ -37,14 +44,20 @@ torch.backends.cudnn.benchmark = False
 def main():
     t0 = time.time()
 
-    # Load config data
-    with open(MODELS_DIR / "ecgconvnet_one_epoch_config.json") as f:
-        config = json.load(f)
+    args = parse_args()
+    if verbose:
+        print("CLI parsed subsample_frac =", args.subsample_frac)
+
+    config = load_training_config(MODELS_DIR / "final_config.json")
+    print(f"Config file contents: {config}")
+
+    if args.subsample_frac is not None:
+        config.subsample_frac = args.subsample_frac
 
     # Load data
     print("Loading data for evaluation...")
     X, y, meta = load_ptbxl_full(
-        data_dir=PTBXL_DATA_DIR, subsample_frac=0.6, sampling_rate=100
+        data_dir=PTBXL_DATA_DIR, subsample_frac=config.subsample_frac, sampling_rate=100
     )
 
     # Filter unknown labels
@@ -64,7 +77,7 @@ def main():
     # Load model
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = ECGConvNet(num_classes=len(FIVE_SUPERCLASSES)).to(device)
-    model.load_state_dict(torch.load(MODELS_DIR / "ecgconvnet_one_epoch.pth"))
+    model.load_state_dict(torch.load(MODELS_DIR / "model_best.pth"))
     model.eval()
 
     criterion = nn.CrossEntropyLoss()
@@ -108,9 +121,9 @@ def main():
         y_pred=y_pred.tolist(),
         class_names=FIVE_SUPERCLASSES,
         out_folder=OUTPUT_DIR / "plots",
-        lr=config["lr"],
-        bs=config["batch_size"],
-        wd=config["weight_decay"],
+        lr=config.lr,
+        bs=config.batch_size,
+        wd=config.weight_decay,
         fold=config["fold"],
         epochs=config["epochs"],
         prefix="eval",
@@ -151,6 +164,10 @@ def main():
         prefix="eval",
         fname_metric="loss",
     )
+
+    time_spent = (time.time() - t0) / 60
+
+    print(f"Elapsed time: {time_spent:.2f} minutes")
 
 
 if __name__ == "__main__":

@@ -10,17 +10,25 @@ from pathlib import Path
 # --------------------------------------------------------------------------
 # Third-Party Imports (alphabetical)
 # --------------------------------------------------------------------------
+import json
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from dataclasses import asdict
 from sklearn.preprocessing import LabelEncoder
 from torch.utils.data import DataLoader, TensorDataset
 
 # --------------------------------------------------------------------------
 # Project Imports (ecg_cnn.* in alphabetical order)
 # --------------------------------------------------------------------------
-from ecg_cnn.config.config_loader import load_training_config
+from ecg_cnn.config.config_loader import (
+    load_training_config,
+    merge_configs,
+    normalize_path_fields,
+    load_yaml_as_dict,
+    TrainConfig,
+)
 from ecg_cnn.data.data_utils import (
     FIVE_SUPERCLASSES,
     load_ptbxl_full,
@@ -43,7 +51,6 @@ from ecg_cnn.training.trainer import train_one_epoch
 # --------------------------------------------------------------------------
 
 SEED = 22
-verbose = True
 torch.manual_seed(SEED)
 np.random.seed(SEED)
 random.seed(SEED)
@@ -51,26 +58,74 @@ torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
 
-# --------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # Main Training Script
-# --------------------------------------------------------------------------
-
-
+# ------------------------------------------------------------------------------
 def main():
     t0 = time.time()
     args = parse_args()
-    if verbose:
-        print("CLI parsed subsample_frac =", args.subsample_frac)
 
-    config_path = DEFAULT_TRAINING_CONFIG
-    config = load_training_config(config_path)
-    print(f"Config file contents: {config}")
+    # 1. Load and merge configs
+    base_cfg = load_training_config(DEFAULT_TRAINING_CONFIG)
 
-    if args.model is not None:
-        config.model = args.model
+    print(f"args.config: {args.config}")
+    if args.config:
+        override_dict = load_yaml_as_dict(Path(args.config))
+        config = merge_configs(base_cfg, override_dict)
+    else:
+        config = base_cfg
 
-    if args.subsample_frac is not None:
-        config.subsample_frac = args.subsample_frac
+    config = normalize_path_fields(config)
+    config = override_config_with_args(config, args)
+
+    print(f"config.verbose:  {config.verbose}")
+    if config.verbose:
+        print("Effective training config:")
+        for k, v in vars(config).items():
+            print(f"  {k}: {v}")
+
+    # def main():
+    #     t0 = time.time()
+    #     args = parse_args()
+
+    #     # --------------------------------------------------------------------------
+    #     # 1. Load and merge configs
+    #     # --------------------------------------------------------------------------
+    #     base_config = load_training_config(DEFAULT_TRAINING_CONFIG)
+
+    #     # if args.config:
+    #     #     user_config = load_training_config(Path(args.config))
+    #     #     config = merge_configs(config, user_config)
+
+    #     # if args.config:
+    #     #     override_dict = load_yaml_as_dict(Path(args.config))
+    #     #     override_cfg = TrainConfig(**override_dict)
+    #     #     config = merge_configs(config, override_cfg)
+
+    #     if args.config:
+    #         override_dict = load_yaml_as_dict(Path(args.config))
+    #         # Create TrainConfig *only after* merging
+    #         override_cfg = TrainConfig(**override_dict)
+    #         config = merge_configs(base_config, override_cfg)
+    #     else:
+    #         config = base_config
+
+    #     # Normalize after merging (e.g., str -> Path)
+    #     config = normalize_path_fields(config)
+
+    #     # Apply CLI overrides
+    #     config = override_config_with_args(config, args)
+
+    #     print(f"Config file contents: {config}")
+
+    #     # print("Effective training config:")
+    #     # for k, v in vars(config).items():
+    #     #     print(f"  {k}: {v}")
+
+    #     if config.verbose:
+    #         print("Effective training config:")
+    #         for k, v in vars(config).items():
+    #             print(f"  {k}: {v}")
 
     # Load data
     data_dir = Path(config.data_dir) if config.data_dir else PTBXL_DATA_DIR
@@ -135,6 +190,13 @@ def main():
         f.write(f"Best Loss: {best_loss:.4f}\n")
         f.write(f"Runtime: {elapsed:.2f} minutes\n")
     print(f"Saved training summary to: {summary_path}")
+
+    # Save the final config
+    with open(MODELS_DIR / "final_config.json", "w") as f:
+        json.dump(asdict(config), f, indent=2)
+
+    time_spent = (time.time() - t0) / 60
+    print(f"Elapsed time: {time_spent:.2f} minutes")
 
 
 if __name__ == "__main__":

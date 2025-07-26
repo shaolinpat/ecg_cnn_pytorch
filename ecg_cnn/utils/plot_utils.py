@@ -67,10 +67,11 @@ def format_hparams(
     lr: float,
     bs: int,
     wd: float,
-    fold: int,
+    *,
     epochs: int,
     prefix: str,
     fname_metric: str = "",
+    fold: int | None = None,
 ) -> str:
     """
     Construct a standardized filename string for saved plots or models.
@@ -88,14 +89,14 @@ def format_hparams(
         Batch size. Must be in range [1, 4096].
     wd : float
         Weight decay. Must be in range [0.0, 1.0].
-    fold : int
-        Fold number in cross-validation. Must be non-negative.
     epochs : int
         Number of training epochs. Must be in range [1, 1000].
     prefix : str
         Prefix string indicating model phase or purpose (e.g., "final", "best").
     fname_metric : str, optional
         Optional metric name (e.g., "loss", "accuracy") to include in filename.
+    fold : int
+        Optional: Fold number in cross-validation. Must be non-negative or None.
 
     Returns
     -------
@@ -105,13 +106,21 @@ def format_hparams(
 
     Notes
     -----
-    - input validation done by validate_hparams(lr, bs, wd, fold, epochs, prefix,fname_metric)
+    - input validation done by validate_hparams(lr, bs, wd, epochs, prefix,fname_metric, fold)
     - Floats are truncated to at most 6 decimal places and then stripped of leading "0." and trailing zeros.
     - Floats smaller than 1e-6 are disallowed to avoid loss of precision or misleading filenames.
 
     """
     # will raise an error if the params are out of spec
-    validate_hparams(lr, bs, wd, fold, epochs, prefix, fname_metric)
+    validate_hparams(
+        lr=lr,
+        bs=bs,
+        wd=wd,
+        epochs=epochs,
+        prefix=prefix,
+        fname_metric=fname_metric,
+        fold=fold,
+    )
 
     # --- Helper function for trimming floats ---
     def _trim(val: float) -> str:
@@ -140,10 +149,10 @@ def save_plot_curves(
     lr: float,
     bs: int,
     wd: float,
-    fold: int,
     epochs: int,
     prefix: str,
     fname_metric: str,
+    fold: int | None = None,
 ):
     """
     Draws and saves a line plot comparing training and validation curves
@@ -169,14 +178,14 @@ def save_plot_curves(
         Batch size. Must be in range [1, 4096].
     wd : float
         Weight decay. Must be in range [0.0, 1.0].
-    fold : int
-        Fold number in cross-validation. Must be non-negative.
     epochs : int
         Number of training epochs. Must be in range [1, 1000].
     prefix : str
         Prefix string indicating model phase or purpose (e.g., "final", "best").
     fname_metric : str, optional
         Optional metric name (e.g., "loss", "accuracy") to include in filename.
+    fold : int
+        Optional fold number in cross-validation. Must be non-negative or None.
 
     Raises
     ------
@@ -220,10 +229,10 @@ def save_plot_curves(
         lr=lr,
         bs=bs,
         wd=wd,
-        fold=fold,
         epochs=epochs,
         prefix=prefix,
         fname_metric=fname_metric,
+        fold=fold,
     )
     path = Path(out_folder) / filename
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -253,11 +262,11 @@ def save_confusion_matrix(
     lr: float,
     bs: int,
     wd: float,
-    fold: int,
     epochs: int,
     prefix: str,
     fname_metric: str,
     normalize: bool = True,
+    fold: int | None = None,
 ):
     """
     Builds a confusion matrix (optionally normalized), displays it with labels,
@@ -279,16 +288,18 @@ def save_confusion_matrix(
         Batch size. Must be in range [1, 4096].
     wd : float
         Weight decay. Must be in range [0.0, 1.0].
-    fold : int
-        Fold number in cross-validation. Must be non-negative.
     epochs : int
         Number of training epochs. Must be in range [1, 1000].
     prefix : str
         Prefix string indicating model phase or purpose (e.g., "final", "best").
     fname_metric : str
-        Short string describing the metric (e.g., "confmat") to include in the filename.
+        Short string describing the metric (e.g., "confmat") to include in the
+        filename.
     normalize : bool, optional
         Whether to normalize the confusion matrix (default is True).
+    fold : int, optional
+        Fold number in cross-validation. Must be non-negative if present.
+        Default is None
 
     Raises
     ------
@@ -340,7 +351,15 @@ def save_confusion_matrix(
     cm.ax_.set_title(plot_title)
 
     # Save figure
-    filename = format_hparams(lr, bs, wd, fold, epochs, prefix, fname_metric)
+    filename = format_hparams(
+        lr=lr,
+        bs=bs,
+        wd=wd,
+        epochs=epochs,
+        prefix=prefix,
+        fname_metric=fname_metric,
+        fold=fold,
+    )
     path = out_folder / f"{filename}.png"
     cm.figure_.savefig(path)
     cm.figure_.clf()
@@ -354,11 +373,11 @@ def save_pr_threshold_curve(
     lr: float,
     bs: int,
     wd: float,
-    fold: int,
     epochs: int,
     prefix: str,
     fname_metric: str,
     title: str = "Precision & Recall vs Threshold",
+    fold: int | None = None,
 ):
     """
     Plot and save a Precision-Recall vs Threshold curve using standardized filename and validated inputs.
@@ -377,8 +396,6 @@ def save_pr_threshold_curve(
         Batch size. Must be in range [1, 4096].
     wd : float
         Weight decay. Must be in range [0.0, 1.0].
-    fold : int
-        Fold number in cross-validation. Must be non-negative.
     epochs : int
         Number of training epochs. Must be in range [1, 1000].
     prefix : str
@@ -387,6 +404,8 @@ def save_pr_threshold_curve(
         Short descriptor for the metric (e.g., "pr_threshold").
     title : str, optional
         Title to display on the plot (default = "Precision & Recall vs Threshold").
+    fold : int | None, optional
+        Fold number in cross-validation. Must be non-negative or None.
 
     Raises
     ------
@@ -420,17 +439,25 @@ def save_pr_threshold_curve(
         lr=lr,
         bs=bs,
         wd=wd,
-        fold=fold,
         epochs=epochs,
         prefix=prefix,
         fname_metric=fname_metric,
+        fold=fold,
     )
 
     # --- Prepare output path ---
     out_folder = Path(out_folder)
     out_folder.mkdir(parents=True, exist_ok=True)
 
-    filename = format_hparams(lr, bs, wd, fold, epochs, prefix, fname_metric)
+    filename = format_hparams(
+        lr=lr,
+        bs=bs,
+        wd=wd,
+        epochs=epochs,
+        prefix=prefix,
+        fname_metric=fname_metric,
+        fold=fold,
+    )
     out_path = out_folder / f"{filename}.png"
 
     # --- Compute curve ---
@@ -462,10 +489,10 @@ def save_classification_report(
     lr: float,
     bs: int,
     wd: float,
-    fold: int,
     epochs: int,
     prefix: str,
     fname_metric: str,
+    fold: int | None = None,
     title: str = "Classification Report",
 ):
     """
@@ -487,14 +514,14 @@ def save_classification_report(
         Batch size. Must be in range [1, 4096].
     wd : float
         Weight decay. Must be in range [0.0, 1.0].
-    fold : int
-        Fold number in cross-validation. Must be non-negative.
     epochs : int
         Number of training epochs. Must be in range [1, 1000].
     prefix : str
         Filename prefix, such as 'best' or 'final'.
     fname_metric : str
         Short descriptor for the metric, such as 'class_report'.
+    fold : int, optionaol
+        Fold number in cross-validation. Must be non-negative or None
     title : str, optional
         Plot title (default = "Classification Report").
 
@@ -540,7 +567,15 @@ def save_classification_report(
     # --- Prepare output paths ---
     out_folder = Path(out_folder)
     out_folder.mkdir(parents=True, exist_ok=True)
-    fname = format_hparams(lr, bs, wd, fold, epochs, prefix, fname_metric)
+    fname = format_hparams(
+        lr=lr,
+        bs=bs,
+        wd=wd,
+        epochs=epochs,
+        prefix=prefix,
+        fname_metric=fname_metric,
+        fold=fold,
+    )
     out_path_txt = out_folder / f"{fname}.txt"
     out_path_png = out_folder / f"{fname}.png"
 
@@ -575,98 +610,6 @@ def save_classification_report(
     fig.savefig(out_path_png)
     plt.close(fig)
     print(f"Saved classification report heatmap to {out_path_png}")
-
-
-# def evaluate_and_plot(
-#     y_true,
-#     y_pred,
-#     train_accs,
-#     val_accs,
-#     train_losses,
-#     val_losses,
-#     lr,
-#     bs,
-#     wd,
-#     fold,
-#     epochs,
-#     out_folder,
-#     class_names,
-# ):
-#     print(
-#         f"\n=== Final Evaluation (LR={lr}, BS={bs}, Fold={fold}, Epochs={epochs}) ==="
-#     )
-
-#     report_dir = Path(out_folder) / "reports"
-#     heatmap_dir = Path(out_folder) / "plots"
-
-#     # 1) Print classification report
-#     print("Classification Report:")
-#     print(
-#         classification_report(
-#             y_true,
-#             y_pred,
-#             labels=list(range(len(class_names))),
-#             target_names=class_names,
-#             zero_division=0,
-#         )
-#     )
-
-#     save_classification_report(
-#         y_true=y_true,
-#         y_pred=y_pred,
-#         class_names=class_names,
-#         out_path_txt=report_dir / "classification_report.txt",
-#         out_path_png=heatmap_dir / "classification_report.png",
-#     )
-
-#     # 2) Accuracy curve
-#     save_plot_curves(
-#         x_vals=train_accs,
-#         y_vals=val_accs,
-#         x_label="Epoch",
-#         y_label="Accuracy",
-#         title_metric="Accuracy",
-#         fname_metric="accuracy",
-#         lr=lr,
-#         bs=bs,
-#         wd=wd,
-#         fold=fold,
-#         epochs=epochs,
-#         out_folder=out_folder,
-#         prefix="final",
-#     )
-
-#     # 3) Loss curve
-#     save_plot_curves(
-#         x_vals=train_losses,
-#         y_vals=val_losses,
-#         x_label="Epoch",
-#         y_label="Loss",
-#         title_metric="Loss",
-#         fname_metric="loss",
-#         lr=lr,
-#         bs=bs,
-#         wd=wd,
-#         fold=fold,
-#         epochs=epochs,
-#         out_folder=out_folder,
-#         prefix="final",
-#     )
-
-#     # 4) Confusion matrix (normalized)
-#     save_confusion_matrix(
-#         y_true=y_true,
-#         y_pred=y_pred,
-#         class_names=class_names,
-#         lr=lr,
-#         bs=bs,
-#         wd=wd,
-#         fold=fold,
-#         epochs=epochs,
-#         out_folder=out_folder,
-#         prefix="final",
-#         normalize=True,
-#     )
 
 
 def evaluate_and_plot(
@@ -841,13 +784,13 @@ def evaluate_and_plot(
         y_true=y_true,
         y_pred=y_pred,
         class_names=class_names,
+        out_folder=plot_dir,
         lr=lr,
         bs=bs,
         wd=wd,
-        fold=fold,
         epochs=epochs,
         prefix=prefix,
         fname_metric="confusion_matrix",
-        out_folder=plot_dir,
         normalize=True,
+        fold=fold,
     )

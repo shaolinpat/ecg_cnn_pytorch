@@ -5,10 +5,10 @@ def validate_hparams(
     lr: float,
     bs: int,
     wd: float,
-    fold: int,
     epochs: int,
     prefix: str,
     fname_metric: str = "",
+    fold: int | None = None,
 ) -> None:
     """
     Validates hyperparameters used for filename formatting or training configuration.
@@ -22,7 +22,7 @@ def validate_hparams(
     wd : float
         Weight decay. Must be in range [0.0, 1.0].
     fold : int
-        Fold number in cross-validation. Must be non-negative.
+        Fold number in cross-validation. Must be non-negative or None.
     epochs : int
         Number of training epochs. Must be in range [1, 1000].
     prefix : str
@@ -49,8 +49,10 @@ def validate_hparams(
         raise ValueError(
             f"Weight decay must be int or float in range [0.0, 1.0]. Got: {wd}"
         )
-    if not isinstance(fold, int) or fold < 0:
-        raise ValueError(f"Fold number must be a non-negative integer. Got: {fold}")
+    if fold is not None and (not isinstance(fold, int) or fold < 0):
+        raise ValueError(
+            f"Fold number must be a non-negative integer or None. Got: {fold}"
+        )
     if not isinstance(epochs, int) or not (1 <= epochs <= 1000):
         raise ValueError(f"Epochs must be an integer in range [1, 1000]. Got: {epochs}")
     if not isinstance(prefix, str) or not prefix.strip():

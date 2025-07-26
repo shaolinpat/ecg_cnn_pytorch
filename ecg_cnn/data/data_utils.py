@@ -175,8 +175,6 @@ def build_full_X_y(meta_csv, scp_csv, ptb_path):
 
     """
 
-    print("HERE")
-
     # Normalize path input
     ptb_path = Path(ptb_path)
 
@@ -540,7 +538,6 @@ def load_ptbxl_full(data_dir, subsample_frac, sampling_rate=100):
     """
     SEED = 22
 
-    print("Fuck ChatGPT")
     # Normalize and validate inputs
     data_dir = Path(data_dir)
     if not data_dir.is_dir():
@@ -557,9 +554,8 @@ def load_ptbxl_full(data_dir, subsample_frac, sampling_rate=100):
     filenames = meta_df[col].tolist()
     ecg_ids = meta_df.index.tolist()
 
-    print(subsample_frac)
+    print(f"subsample_frac: {subsample_frac}")
     if subsample_frac < 1.0:
-        print("HERE")
         np.random.seed(SEED)
         idx = np.random.choice(
             len(ecg_ids), int(len(ecg_ids) * subsample_frac), replace=False
@@ -591,7 +587,6 @@ def load_ptbxl_full(data_dir, subsample_frac, sampling_rate=100):
     # Derive y from raw scp_codes via your mapping helper
     y = [raw_to_five_class(s) for s in full_meta["scp_codes"]]
 
-    print(full_meta.shape)
     print(f"Loaded {len(ids)} records after subsampling.")
     return X, y, full_meta
 

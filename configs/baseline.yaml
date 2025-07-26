@@ -13,3 +13,6 @@ subsample_frac: 1.0
 sampling_rate: 100
 data_dir: null     # optional override
 sample_dir: null   # optional override
+
+# Housekeeping
+verbose: true

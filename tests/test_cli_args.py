@@ -19,80 +19,112 @@ from ecg_cnn.training.cli_args import (
 
 
 @pytest.mark.parametrize(
-    "cli_input,expected",
+    "cli_input, expected",
     [
+        # === Defaults (when no CLI arguments are passed) ===
         (
             [],
             {
-                "sample_dir": "data/larger_sample",
-                "sample_only": False,
-                "data_dir": PTBXL_DATA_DIR,
-                "subsample_frac": 1.0,
-                "batch_size": 32,
-                "kernel_sizes": [16, 3, 3],
-                "conv_dropout": 0.3,
-                "fc_dropout": 0.5,
+                "sample_dir": None,
+                "sample_only": None,
+                "data_dir": None,
+                "subsample_frac": None,
+                "batch_size": None,
+                "kernel_sizes": None,
+                "conv_dropout": None,
+                "fc_dropout": None,
+                "lr": None,
+                "weight_decay": None,
+                "epochs": None,
+                "model": None,
+                "save_best": None,
+                "verbose": None,
             },
         ),
-        (
-            ["--sample-only"],
-            {
-                "sample_only": True,
-            },
-        ),
-        (
-            ["--sample-dir", "samples/test"],
-            {
-                "sample_dir": "samples/test",
-            },
-        ),
-        (
-            ["--data-dir", "/mnt/ptbxl"],
-            {
-                "data_dir": "/mnt/ptbxl",
-            },
-        ),
-        (
-            ["--subsample-frac", "0.2"],
-            {
-                "subsample_frac": 0.2,
-            },
-        ),
-        (
-            ["--batch-size", "64"],
-            {
-                "batch_size": 64,
-            },
-        ),
-        (
-            ["--kernel-sizes", "9", "5", "3"],
-            {
-                "kernel_sizes": [9, 5, 3],
-            },
-        ),
-        (
-            ["--conv-dropout", "0.1"],
-            {
-                "conv_dropout": 0.1,
-            },
-        ),
-        (
-            ["--fc-dropout", "0.4"],
-            {
-                "fc_dropout": 0.4,
-            },
-        ),
+        # === Individual Overrides ===
+        (["--sample-only"], {"sample_only": True}),
+        (["--sample-dir", "samples/test"], {"sample_dir": "samples/test"}),
+        (["--data-dir", "/mnt/ptbxl"], {"data_dir": "/mnt/ptbxl"}),
+        (["--subsample-frac", "0.2"], {"subsample_frac": 0.2}),
+        (["--batch-size", "64"], {"batch_size": 64}),
+        (["--kernel-sizes", "9", "5", "3"], {"kernel_sizes": [9, 5, 3]}),
+        (["--conv-dropout", "0.1"], {"conv_dropout": 0.1}),
+        (["--fc-dropout", "0.4"], {"fc_dropout": 0.4}),
+        (["--lr", "0.0005"], {"lr": 0.0005}),
+        (["--weight-decay", "0.001"], {"weight_decay": 0.001}),
+        (["--epochs", "20"], {"epochs": 20}),
+        (["--model", "ECGConvNetV2"], {"model": "ECGConvNetV2"}),
+        (["--save-best"], {"save_best": True}),
+        (["--verbose"], {"verbose": True}),
     ],
 )
 def test_parse_args(monkeypatch, cli_input, expected):
     monkeypatch.setattr(sys, "argv", ["train.py"] + cli_input)
     args = parse_args()
-    for key, val in expected.items():
-        actual = getattr(args, key)
-        if isinstance(actual, Path) and isinstance(val, (str, Path)):
-            assert actual.resolve() == Path(val).resolve()
+
+    for key, expected_val in expected.items():
+        actual_val = getattr(args, key)
+
+        # Normalize Paths for comparison
+        if isinstance(actual_val, Path) or isinstance(expected_val, Path):
+            assert Path(actual_val) == Path(
+                expected_val
+            ), f"{key} path mismatch: expected {expected_val}, got {actual_val}"
         else:
-            assert actual == val
+            assert (
+                actual_val == expected_val
+            ), f"Expected {expected_val!r} for {key}, got {actual_val!r}"
+
+
+def test_override_config_updates_fields():
+    # Step 1: Create a baseline TrainConfig (matches typical baseline.yaml)
+    base_config = TrainConfig(
+        model="ECGConvNet",
+        lr=0.001,
+        batch_size=64,
+        weight_decay=0.0,
+        epochs=10,
+        save_best=True,
+        sample_only=False,
+        subsample_frac=1.0,
+        sampling_rate=100,
+        data_dir=None,
+        sample_dir=None,
+        verbose=False,
+    )
+
+    # Step 2: Create a mock CLI args object (as if parsed by argparse)
+    cli_args = Namespace(
+        model="ECGConvNetV2",
+        lr=0.005,
+        batch_size=128,
+        weight_decay=0.01,
+        epochs=25,
+        save_best=False,
+        sample_only=True,
+        subsample_frac=0.2,
+        sampling_rate=500,
+        data_dir="/mnt/data",
+        sample_dir="samples/override",
+        verbose=True,
+    )
+
+    # Step 3: Apply overrides
+    updated_config = override_config_with_args(base_config, cli_args)
+
+    # Step 4: Assert that overrides took effect
+    assert updated_config.model == "ECGConvNetV2"
+    assert updated_config.lr == 0.005
+    assert updated_config.batch_size == 128
+    assert updated_config.weight_decay == 0.01
+    assert updated_config.epochs == 25
+    assert updated_config.save_best is False
+    assert updated_config.sample_only is True
+    assert updated_config.subsample_frac == 0.2
+    assert updated_config.sampling_rate == 500
+    assert str(updated_config.data_dir) == "/mnt/data"
+    assert str(updated_config.sample_dir) == "samples/override"
+    assert updated_config.verbose is True
 
 
 @pytest.mark.parametrize(
@@ -309,7 +341,7 @@ def test_override_config_rejects_nonstring_data_dir():
         data_dir=None,
         sample_dir=None,
     )
-    with pytest.raises(ValueError, match="data_dir must be a string or None"):
+    with pytest.raises(ValueError, match="data_dir must be a string, Path, or None"):
         override_config_with_args(config, dummy_args)
 
 
@@ -339,6 +371,119 @@ def test_override_config_rejects_nonstring_sample_dir():
         sampling_rate=None,
         data_dir=None,
         sample_dir=None,
+        verbose=None,
     )
-    with pytest.raises(ValueError, match="sample_dir must be a string or None"):
+    with pytest.raises(ValueError, match="sample_dir must be a string, Path, or None"):
         override_config_with_args(config, dummy_args)
+
+
+def test_override_config_rejects_non_boolean_verbose():
+    config = TrainConfig(
+        model="ECGConvNet",
+        lr=0.001,
+        batch_size=64,
+        weight_decay=0.0,
+        epochs=10,
+        save_best=True,
+        sample_only=False,
+        subsample_frac=1.0,
+        sampling_rate=100,
+        data_dir="test",
+        sample_dir="/sample",
+        verbose="true",
+    )
+    dummy_args = argparse.Namespace(
+        model=None,
+        lr=None,
+        batch_size=None,
+        weight_decay=None,
+        epochs=None,
+        save_best=None,
+        sample_only=None,
+        subsample_frac=None,
+        sampling_rate=None,
+        data_dir=None,
+        sample_dir=None,
+        verbose=None,
+    )
+    with pytest.raises(ValueError, match="verbose must be a boolean or None"):
+        override_config_with_args(config, dummy_args)
+
+
+@pytest.mark.parametrize(
+    "cli_args, expected_overrides",
+    [
+        (
+            Namespace(batch_size=128, lr=0.001, verbose=True),
+            {"batch_size": 128, "lr": 0.001, "verbose": True},
+        ),
+        (Namespace(model="ECGConvNetV2"), {"model": "ECGConvNetV2"}),
+        (
+            Namespace(subsample_frac=0.2, save_best=False),
+            {"subsample_frac": 0.2, "save_best": False},
+        ),
+        (
+            Namespace(sample_only=True, data_dir="/mnt/data", sample_dir="sample/path"),
+            {
+                "sample_only": True,
+                "data_dir": "/mnt/data",
+                "sample_dir": "sample/path",
+            },
+        ),
+        (
+            Namespace(epochs=50, weight_decay=0.0001),
+            {"epochs": 50, "weight_decay": 0.0001},
+        ),
+    ],
+)
+def test_override_config_with_args_applies_correctly(cli_args, expected_overrides):
+    # Start from a YAML-style default config
+    base_config = TrainConfig(
+        model="ECGConvNet",
+        lr=0.01,
+        batch_size=64,
+        weight_decay=0.0,
+        epochs=10,
+        save_best=True,
+        sample_only=False,
+        subsample_frac=1.0,
+        sampling_rate=100,
+        data_dir=None,
+        sample_dir=None,
+        verbose=False,
+    )
+
+    # Fill in unspecified CLI args with None to simulate realistic Namespace
+    for field in [
+        "model",
+        "lr",
+        "batch_size",
+        "weight_decay",
+        "epochs",
+        "save_best",
+        "sample_only",
+        "subsample_frac",
+        "sampling_rate",
+        "data_dir",
+        "sample_dir",
+        "verbose",
+    ]:
+        if not hasattr(cli_args, field):
+            setattr(cli_args, field, None)
+
+    # Apply CLI overrides
+    updated = override_config_with_args(base_config, cli_args)
+
+    # Verify overridden fields
+    for key, expected_value in expected_overrides.items():
+        actual_value = getattr(updated, key)
+        assert (
+            actual_value == expected_value
+        ), f"{key}: expected {expected_value!r}, got {actual_value!r}"
+
+    # Ensure other fields remain unchanged
+    for key in base_config.__dataclass_fields__:
+        if key not in expected_overrides:
+            assert getattr(updated, key) == getattr(
+                base_config, key
+            ), f"{key} unexpectedly changed"

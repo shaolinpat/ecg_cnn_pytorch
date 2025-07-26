@@ -1,18 +1,9 @@
-import numpy as np
-
-# import os
-# import pandas as pd
 import matplotlib.pyplot as plt
+import numpy as np
 import pytest
 import tempfile
 
-# import torch
-# import wfdb
-
 from pathlib import Path
-
-# from unittest.mock import patch
-# from ecg_cnn.data.dataset import PTBXLFullDataset
 
 from ecg_cnn.utils.plot_utils import (
     _build_plot_title,
@@ -34,10 +25,10 @@ def default_hparam_kwargs():
         lr=0.001,
         bs=64,
         wd=0.0,
-        fold=1,
         epochs=10,
         prefix="test",
         fname_metric="some_metric",
+        fold=1,
     )
 
 
@@ -231,6 +222,31 @@ def test_format_hparams_fname_metric_lower_cased():
         lr=0.001, bs=128, wd=0.1, fold=0, epochs=1, prefix="test", fname_metric="LOSS"
     )
     assert "test_loss" in result
+
+
+def test_format_hparams_keyword_only():
+    """
+    Ensure that format_hparams() enforces keyword-only arguments beyond the first three.
+    """
+    from ecg_cnn.utils.plot_utils import format_hparams
+
+    # Valid usage (all keyword arguments)
+    result = format_hparams(
+        lr=0.001,
+        bs=64,
+        wd=0.0,
+        epochs=10,
+        prefix="test",
+        fname_metric="metric",
+        fold=1,
+    )
+    assert isinstance(result, str)
+    assert result.startswith("test_metric_lr001_bs64")
+
+    # Invalid usage: positional argument where keyword is required
+    with pytest.raises(TypeError):
+        # Here, 10 is passed as positional argument for `epochs`, which is keyword-only
+        format_hparams(0.001, 64, 0.0, 10, "test", "metric", 1)
 
 
 # ------------------------------------------------------------------------------
@@ -856,7 +872,6 @@ def test_save_classification_report_invalid_out_folder(bad_out):
 #     class_names: list[str],
 # ) -> None:
 # ------------------------------------------------------------------------------
-
 
 dummy_accs = [0.8, 0.85, 0.9]
 dummy_losses = [0.5, 0.4, 0.3]
