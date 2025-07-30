@@ -22,7 +22,7 @@ class TrainConfig:
         Mini-batch size.
     weight_decay : float
         L2 regularization strength.
-    epochs : int
+    n_epochs : int
         Number of training epochs.
     save_best : bool
         Whether to save only the best model based on validation performance.
@@ -38,13 +38,15 @@ class TrainConfig:
         Optional path to the sample dataset directory.
     verbose : bool
         Whether to print detailed status and configuration info during training.
+    n_folds : int
+        Number of folds to use for cross-validation (e.g., 5 for 5-fold CV).
     """
 
     model: str
     lr: float
     batch_size: int
     weight_decay: float
-    epochs: int
+    n_epochs: int
     save_best: bool
     sample_only: bool
     subsample_frac: float
@@ -52,6 +54,7 @@ class TrainConfig:
     data_dir: Union[str, Path, None] = None
     sample_dir: Union[str, Path, None] = None
     verbose: bool = False
+    n_folds: int = 1
 
     def finalize(self) -> "TrainConfig":
         """
@@ -116,6 +119,7 @@ def load_training_config(path: Path | str, strict: bool = True) -> TrainConfig |
         raise ValueError(f"Config must be a YAML dictionary: {path}")
 
     if strict:
+        raw.pop("fold", None)  # <- Drop fold before validation
         try:
             cfg = TrainConfig(**raw)
         except TypeError as e:
@@ -166,19 +170,27 @@ def merge_configs(base: TrainConfig, override: TrainConfig | dict) -> TrainConfi
 
     for f in fields(base):
         name = f.name
-        override_val = override_dict.get(name, None)
+        # override_val = override_dict.get(name, None)
 
-        if override_val is None:
+        # if override_val is None:
+        #     continue
+        if name not in override_dict:
             continue
+        override_val = override_dict[name]
 
         expected_type = f.type
 
         if get_origin(expected_type) is Union:
-            accepted_types = tuple(
-                t for t in get_args(expected_type) if t is not type(None)
-            )
+            accepted_types = tuple(get_args(expected_type))
         else:
             accepted_types = (expected_type,)
+
+        # if get_origin(expected_type) is Union:
+        #     accepted_types = tuple(
+        #         t for t in get_args(expected_type) if t is not type(None)
+        #     )
+        # else:
+        #     accepted_types = (expected_type,)
 
         if isinstance(override_val, accepted_types):
             base_dict[name] = override_val

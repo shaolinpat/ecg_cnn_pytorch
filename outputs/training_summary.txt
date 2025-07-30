@@ -1,2 +1,2 @@
-Best Loss: 1.1381
-Runtime: 1.37 minutes
+Best Loss: 1.2204
+Runtime: 1.67 minutes

@@ -35,7 +35,7 @@ from ecg_cnn.training.cli_args import (
                 "fc_dropout": None,
                 "lr": None,
                 "weight_decay": None,
-                "epochs": None,
+                "n_epochs": None,
                 "model": None,
                 "save_best": None,
                 "verbose": None,
@@ -52,7 +52,7 @@ from ecg_cnn.training.cli_args import (
         (["--fc-dropout", "0.4"], {"fc_dropout": 0.4}),
         (["--lr", "0.0005"], {"lr": 0.0005}),
         (["--weight-decay", "0.001"], {"weight_decay": 0.001}),
-        (["--epochs", "20"], {"epochs": 20}),
+        (["--n_epochs", "20"], {"n_epochs": 20}),
         (["--model", "ECGConvNetV2"], {"model": "ECGConvNetV2"}),
         (["--save-best"], {"save_best": True}),
         (["--verbose"], {"verbose": True}),
@@ -83,7 +83,7 @@ def test_override_config_updates_fields():
         lr=0.001,
         batch_size=64,
         weight_decay=0.0,
-        epochs=10,
+        n_epochs=10,
         save_best=True,
         sample_only=False,
         subsample_frac=1.0,
@@ -99,7 +99,7 @@ def test_override_config_updates_fields():
         lr=0.005,
         batch_size=128,
         weight_decay=0.01,
-        epochs=25,
+        n_epochs=25,
         save_best=False,
         sample_only=True,
         subsample_frac=0.2,
@@ -117,7 +117,7 @@ def test_override_config_updates_fields():
     assert updated_config.lr == 0.005
     assert updated_config.batch_size == 128
     assert updated_config.weight_decay == 0.01
-    assert updated_config.epochs == 25
+    assert updated_config.n_epochs == 25
     assert updated_config.save_best is False
     assert updated_config.sample_only is True
     assert updated_config.subsample_frac == 0.2
@@ -180,7 +180,7 @@ def make_min_config(**overrides):
         lr=0.001,
         batch_size=64,
         weight_decay=0.0,
-        epochs=10,
+        n_epochs=10,
         save_best=True,
         sample_only=False,
         subsample_frac=1.0,
@@ -199,7 +199,7 @@ def test_override_config_with_args_with_valid_args():
         lr=0.01,
         batch_size=128,
         weight_decay=0.001,
-        epochs=20,
+        n_epochs=20,
         save_best=False,
         sample_only=True,
         subsample_frac=0.5,
@@ -212,7 +212,7 @@ def test_override_config_with_args_with_valid_args():
     assert updated.lr == 0.01
     assert updated.batch_size == 128
     assert updated.weight_decay == 0.001
-    assert updated.epochs == 20
+    assert updated.n_epochs == 20
     assert updated.save_best is False
     assert updated.sample_only is True
     assert updated.subsample_frac == 0.5
@@ -248,7 +248,7 @@ def test_override_config_with_args_rejects_nonstring_model():
         lr=0.001,
         batch_size=64,
         weight_decay=0.0,
-        epochs=10,
+        n_epochs=10,
         save_best=True,
         sample_only=False,
         subsample_frac=1.0,
@@ -279,7 +279,7 @@ def test_override_config_with_args_accepts_none_data_dir_and_sample_dir():
         lr=0.001,
         batch_size=64,
         weight_decay=0.0,
-        epochs=10,
+        n_epochs=10,
         save_best=True,
         sample_only=False,
         subsample_frac=1.0,
@@ -292,7 +292,7 @@ def test_override_config_with_args_accepts_none_data_dir_and_sample_dir():
         lr=None,
         batch_size=None,
         weight_decay=None,
-        epochs=None,
+        n_epochs=None,
         save_best=None,
         sample_only=None,
         subsample_frac=None,
@@ -305,7 +305,7 @@ def test_override_config_with_args_accepts_none_data_dir_and_sample_dir():
     assert updated.lr == 0.001
     assert updated.batch_size == 64
     assert updated.weight_decay == 0.0
-    assert updated.epochs == 10
+    assert updated.n_epochs == 10
     assert updated.save_best is True
     assert updated.sample_only is False
     assert updated.subsample_frac == 1.0
@@ -320,7 +320,7 @@ def test_override_config_with_args_rejects_nonstring_data_dir():
         lr=0.001,
         batch_size=64,
         weight_decay=0.0,
-        epochs=10,
+        n_epochs=10,
         save_best=True,
         sample_only=False,
         subsample_frac=1.0,
@@ -351,7 +351,7 @@ def test_override_config_with_args_rejects_nonstring_sample_dir():
         lr=0.001,
         batch_size=64,
         weight_decay=0.0,
-        epochs=10,
+        n_epochs=10,
         save_best=True,
         sample_only=False,
         subsample_frac=1.0,
@@ -383,7 +383,7 @@ def test_override_confi_with_args_rejects_non_boolean_verbose():
         lr=0.001,
         batch_size=64,
         weight_decay=0.0,
-        epochs=10,
+        n_epochs=10,
         save_best=True,
         sample_only=False,
         subsample_frac=1.0,
@@ -431,8 +431,8 @@ def test_override_confi_with_args_rejects_non_boolean_verbose():
             },
         ),
         (
-            Namespace(epochs=50, weight_decay=0.0001),
-            {"epochs": 50, "weight_decay": 0.0001},
+            Namespace(n_epochs=50, weight_decay=0.0001),
+            {"n_epochs": 50, "weight_decay": 0.0001},
         ),
     ],
 )
@@ -443,7 +443,7 @@ def test_override_config_with_args_applies_correctly(cli_args, expected_override
         lr=0.01,
         batch_size=64,
         weight_decay=0.0,
-        epochs=10,
+        n_epochs=10,
         save_best=True,
         sample_only=False,
         subsample_frac=1.0,
@@ -451,6 +451,7 @@ def test_override_config_with_args_applies_correctly(cli_args, expected_override
         data_dir=None,
         sample_dir=None,
         verbose=False,
+        n_folds=2,
     )
 
     # Fill in unspecified CLI args with None to simulate realistic Namespace
@@ -459,7 +460,7 @@ def test_override_config_with_args_applies_correctly(cli_args, expected_override
         "lr",
         "batch_size",
         "weight_decay",
-        "epochs",
+        "n_epochs",
         "save_best",
         "sample_only",
         "subsample_frac",
@@ -495,7 +496,7 @@ def test_override_config_with_args_rejects_empty_model():
         lr=0.001,
         batch_size=64,
         weight_decay=0.0,
-        epochs=10,
+        n_epochs=10,
         save_best=True,
         sample_only=False,
         subsample_frac=1.0,
@@ -509,7 +510,7 @@ def test_override_config_with_args_rejects_empty_model():
         lr=None,
         batch_size=None,
         weight_decay=None,
-        epochs=None,
+        n_epochs=None,
         save_best=None,
         sample_only=None,
         subsample_frac=None,
@@ -518,17 +519,17 @@ def test_override_config_with_args_rejects_empty_model():
         sample_dir=None,
         verbose=None,
     )
-    with pytest.raises(ValueError, match="model must be a non-empty string"):
+    with pytest.raises(ValueError, match="Model must be a non-empty string."):
         override_config_with_args(config, dummy_args)
 
 
-def test_override_config_with_args_rejects_model_with_blankd_name():
+def test_override_config_with_args_rejects_model_with_blanked_name():
     config = TrainConfig(
         model="  ",
         lr=0.001,
         batch_size=64,
         weight_decay=0.0,
-        epochs=10,
+        n_epochs=10,
         save_best=True,
         sample_only=False,
         subsample_frac=1.0,
@@ -542,7 +543,7 @@ def test_override_config_with_args_rejects_model_with_blankd_name():
         lr=None,
         batch_size=None,
         weight_decay=None,
-        epochs=None,
+        n_epochs=None,
         save_best=None,
         sample_only=None,
         subsample_frac=None,
@@ -551,5 +552,5 @@ def test_override_config_with_args_rejects_model_with_blankd_name():
         sample_dir=None,
         verbose=None,
     )
-    with pytest.raises(ValueError, match="model must be a non-empty string"):
+    with pytest.raises(ValueError, match="Model must be a non-empty string"):
         override_config_with_args(config, dummy_args)

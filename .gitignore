@@ -29,6 +29,8 @@ Thumbs.db
 outputs/models/
 
 # Generated plots and results
+out_folder/
+outputs/history
 outputs/plots/
 outputs/results/
 outputs/predictions/

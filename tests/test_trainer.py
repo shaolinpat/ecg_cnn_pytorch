@@ -90,15 +90,20 @@ def test_train_one_epoch_end_to_end():
     criterion = torch.nn.CrossEntropyLoss()
     device = torch.device("cpu")
 
-    initial_loss = train_one_epoch(model, dataloader, optimizer, criterion, device)
+    initial_loss, initial_accuracy = train_one_epoch(
+        model, dataloader, optimizer, criterion, device
+    )
 
     assert isinstance(initial_loss, float), "train_one_epoch should return a float"
     assert initial_loss > 0.0, "Initial loss should be positive"
 
     # Optional: second epoch to check for progress
-    later_loss = train_one_epoch(model, dataloader, optimizer, criterion, device)
+    later_loss, later_accuracy = train_one_epoch(
+        model, dataloader, optimizer, criterion, device
+    )
 
-    assert isinstance(later_loss, float)
+    assert isinstance(later_loss, float), "Loss should be a float"
+    assert isinstance(later_accuracy, float), "Accuracy should be a float"
     assert later_loss >= 0.0
     # Allow +/-1.0 wiggle room to avoid flakeouts on tiny datasets
     assert (

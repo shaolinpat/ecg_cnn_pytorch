@@ -2,7 +2,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 import pandas as pd
-
 import seaborn as sns
 import wfdb
 
@@ -14,7 +13,7 @@ from sklearn.metrics import (
     precision_recall_curve,
 )
 
-from ecg_cnn.utils.validate import validate_hparams
+from ecg_cnn.utils.validate import validate_hparams_formatting
 
 
 # ------------------------------------------------------------------------------
@@ -27,29 +26,36 @@ def _build_plot_title(
     lr: float,
     bs: int,
     wd: float,
-    fold: int,
-    metric: str,
+    prefix: str,
+    metric: str | None = None,
+    fold: int | None = None,
+    epoch: int | None = None,
 ) -> str:
     """
     Construct a standardized plot title including key hyperparameters.
 
     Format:
-        "<model>: <metric> by Epoch\nLR=<lr>, BS=<bs>, WD=<wd>, Fold=<fold>"
+        "<model>: <metric> by Epoch\nLR=<lr>, BS=<bs>, WD=<wd>, Fold=<fold>, Epoch=<epoch>"
 
     Parameters
     ----------
-    Model : str
-        Descriptive title for the metric being plotted (e.g., "Accuracy", "Loss").
+    model : str
+        Model string indicates model used (e.g., "ECGConvNet").
     lr : float
         Learning rate. Must be in range [1e-6, 1.0].
     bs : int
         Batch size. Must be in range [1, 4096].
     wd : float
         Weight decay. Must be in range [0.0, 1.0].
-    fold : int
-        Cross-validation fold number. Must be a non-negative integer.
-    metric : str
-        Descriptive title for the metric being plotted (e.g., "Accuracy", "Loss").
+    prefix : str
+        String prefix for context (e.g., "final", "best"). Must be non-empty.
+    fold : int or None, optional
+        Fold number used in cross-validation. Must be a non-negative integer or None.
+    epochs : int or None, optional
+        Number of training epochs. Included in title if provided.
+    metric : str or None, optional
+        Metric name (e.g., "loss", "accuracy") to include in title.
+        Defaults to "Metric" if not provided.
 
     Returns
     -------
@@ -61,18 +67,31 @@ def _build_plot_title(
     ValueError
         If any input fails validation checks.
     """
-    # Reuse centralized validation logic (dummy value for epochs, prefix)
-    validate_hparams(
+    if metric is None:
+        metric = "Metric"
+
+    validate_hparams_formatting(
         model=model,
         lr=lr,
         bs=bs,
         wd=wd,
-        fold=fold,
-        epochs=1,
-        prefix="fake",
+        prefix=prefix,
         fname_metric=metric,
+        fold=fold,
+        epoch=epoch,
     )
-    return f"{model}: {metric} by Epoch\nLR={lr}, BS={bs}, WD={wd}, Fold={fold}"
+
+    if epoch is not None:
+        title = f"{model}: {metric} by Epoch"
+    else:
+        title = f"{model}: {metric}"
+
+    plot_title = (
+        f"{title}\nLR={lr}, BS={bs}, WD={wd}"
+        + (f", Fold={fold}" if fold is not None else "")
+        + (f", Epoch={epoch}" if epoch is not None else "")
+    )
+    return plot_title
 
 
 # ------------------------------------------------------------------------------
@@ -85,61 +104,60 @@ def format_hparams(
     lr: float,
     bs: int,
     wd: float,
-    epochs: int,
     prefix: str,
     fname_metric: str = "",
     fold: int | None = None,
+    epoch: int | None = None,
 ) -> str:
     """
     Construct a standardized filename string for saved plots or models.
 
     Format:
-        "<prefix>_<metric>_lr<lr_str>_bs<bs>_wd<wd_str>_fold<fold>_epo<epochs>"
+        "<prefix>_<metric>_lr<lr_str>_bs<bs>_wd<wd_str>_fold<fold>_epo<epoch>"
 
     If fname_metric is omitted, the "_<metric>" part is skipped.
 
     Parameters
     ----------
-    model :str
-        Model string indicates model used.
+    model : str
+        Model string indicates model used (e.g., "ECGConvNet").
     lr : float
         Learning rate. Must be in range [1e-6, 1.0].
     bs : int
         Batch size. Must be in range [1, 4096].
     wd : float
         Weight decay. Must be in range [0.0, 1.0].
-    epochs : int
-        Number of training epochs. Must be in range [1, 1000].
     prefix : str
         Prefix string indicating model phase or purpose (e.g., "final", "best").
     fname_metric : str, optional
-        Optional metric name (e.g., "loss", "accuracy") to include in filename.
-    fold : int
-        Optional: Fold number in cross-validation. Must be non-negative or None.
+        Metric name (e.g., "loss", "accuracy") to include in filename.
+    fold : int or None, optional
+        Fold number used in cross-validation. Must be a non-negative integer or None.
+    epoch : int
+        Epoch that generated the result. Must be in range [1, 1000].
 
     Returns
     -------
     str
         A formatted string of the form:
-            "<prefix>_<metric>_lr<lr>_bs<bs>_wd<wd>_fold<fold>_epoch<epochs>"
+            "<prefix>_<metric>_lr<lr>_bs<bs>_wd<wd>_fold<fold>_epoch<epoch>"
 
     Notes
     -----
-    - input validation done by validate_hparams(lr, bs, wd, epochs, prefix,fname_metric, fold)
+    - input validation done by validate_hparams_formatting(lr, bs, wd, prefix,fname_metric, fold, epoch)
     - Floats are truncated to at most 6 decimal places and then stripped of leading "0." and trailing zeros.
     - Floats smaller than 1e-6 are disallowed to avoid loss of precision or misleading filenames.
-
     """
     # will raise an error if the params are out of spec
-    validate_hparams(
+    validate_hparams_formatting(
         model=model,
         lr=lr,
         bs=bs,
         wd=wd,
-        epochs=epochs,
         prefix=prefix,
         fname_metric=fname_metric,
         fold=fold,
+        epoch=epoch,
     )
 
     # --- Helper function for trimming floats ---
@@ -150,12 +168,6 @@ def format_hparams(
         return trimmed or "0"
 
     # --- Build filename ---
-
-    # lr_str = _trim(lr)
-    # wd_str = _trim(wd)
-    # prefix = prefix.lower()
-    # metric_part = f"_{fname_metric.lower()}" if fname_metric else ""
-
     parts = [prefix.lower()]
     if fname_metric:
         parts.append(fname_metric.lower())
@@ -166,12 +178,8 @@ def format_hparams(
     parts.append(f"wd{_trim(wd)}")
     if fold is not None:
         parts.append(f"fold{fold}")
-    if epochs is not None:
-        parts.append(f"epoch{epochs}")
-
-    # return (
-    #     f"{prefix}{metric_part}_{model}_lr{lr_str}_bs{bs}_wd{wd_str}_fold{fold}_epoch{epochs}"
-    # )
+    if epoch is not None:
+        parts.append(f"epoch{epoch}")
 
     return "_".join(parts)
 
@@ -187,10 +195,10 @@ def save_plot_curves(
     lr: float,
     bs: int,
     wd: float,
-    epochs: int,
     prefix: str,
     fname_metric: str,
     fold: int | None = None,
+    epoch: int | None = None,
 ):
     """
     Draws and saves a line plot comparing training and validation curves
@@ -209,21 +217,24 @@ def save_plot_curves(
     title_metric : str
         Human-readable title (e.g., "Model Accuracy").
     out_folder : str or Path
-        Destination folder where the plot will be saved.
+        Folder to save output files.
+    model : str
+        Model string indicates model used (e.g., "ECGConvNet").
     lr : float
         Learning rate. Must be in range [1e-6, 1.0].
     bs : int
         Batch size. Must be in range [1, 4096].
     wd : float
         Weight decay. Must be in range [0.0, 1.0].
-    epochs : int
-        Number of training epochs. Must be in range [1, 1000].
     prefix : str
         Prefix string indicating model phase or purpose (e.g., "final", "best").
     fname_metric : str, optional
-        Optional metric name (e.g., "loss", "accuracy") to include in filename.
-    fold : int
-        Optional fold number in cross-validation. Must be non-negative or None.
+        Metric name (e.g., "loss", "accuracy") to include in filename.
+    fold : int or None, optional
+        Fold number used in cross-validation. Must be a non-negative integer or None.
+    epoch : int or None, optional
+        Epoch number used for this plot (e.g., best epoch).
+
 
     Raises
     ------
@@ -239,7 +250,7 @@ def save_plot_curves(
 
     if len(x_vals) != len(y_vals):
         raise ValueError(
-            f"x_vals and y_vals must have the same length. Got {len(x_vals)} and {len(y_vals)}."
+            f"x_vals and y_vals must have the same length, got {len(x_vals)} and {len(y_vals)}."
         )
 
     # Normalize to list in case user passed NumPy arrays
@@ -255,29 +266,28 @@ def save_plot_curves(
         ("x_label", x_label),
         ("y_label", y_label),
         ("title_metric", title_metric),
-        ("fname_metric", fname_metric),
         ("prefix", prefix),
     ]:
         if not isinstance(val, str) or not val.strip():
             raise ValueError(f"{name} must be a non-empty string.")
 
-    # Set filename. format_hparams calls _validates_hparams which validates
+    # Set filename. format_hparams calls validates_hparams which validates
     # these parameters
     filename = format_hparams(
         model=model,
         lr=lr,
         bs=bs,
         wd=wd,
-        epochs=epochs,
         prefix=prefix,
         fname_metric=fname_metric,
+        epoch=epoch,
         fold=fold,
     )
-    path = Path(out_folder) / filename
+    path = Path(out_folder) / f"{filename}.png"
     path.parent.mkdir(parents=True, exist_ok=True)
 
     # --- Plot and save ---
-    title = _build_plot_title(model, lr, bs, wd, fold, title_metric)
+    title = _build_plot_title(model, lr, bs, wd, prefix, title_metric, fold, epoch)
 
     fig, ax = plt.subplots()
     ax.plot(x_vals, label="Training")
@@ -302,11 +312,11 @@ def save_confusion_matrix(
     lr: float,
     bs: int,
     wd: float,
-    epochs: int,
     prefix: str,
     fname_metric: str,
     normalize: bool = True,
     fold: int | None = None,
+    epoch: int | None = None,
 ):
     """
     Builds a confusion matrix (optionally normalized), displays it with labels,
@@ -321,27 +331,25 @@ def save_confusion_matrix(
     class_names : list of str
         List of class labels (e.g., ["NORM", "MI", "STTC", ...]).
     out_folder : str or Path
-        Destination folder where the plot will be saved.
+        Folder to save output files.
     model : str
-        Model string indicates model used.
+        Model string indicates model used (e.g., "ECGConvNet").
     lr : float
         Learning rate. Must be in range [1e-6, 1.0].
     bs : int
         Batch size. Must be in range [1, 4096].
     wd : float
         Weight decay. Must be in range [0.0, 1.0].
-    epochs : int
-        Number of training epochs. Must be in range [1, 1000].
     prefix : str
         Prefix string indicating model phase or purpose (e.g., "final", "best").
-    fname_metric : str
-        Short string describing the metric (e.g., "confmat") to include in the
-        filename.
+    fname_metric : str, optional
+        Metric name (e.g., "loss", "accuracy") to include in filename.
     normalize : bool, optional
         Whether to normalize the confusion matrix (default is True).
-    fold : int, optional
-        Fold number in cross-validation. Must be non-negative if present.
-        Default is None
+    fold : int or None, optional
+        Fold number used in cross-validation. Must be a non-negative integer or None.
+    epoch : int or None, optional
+        Epoch number used for this plot (e.g., best epoch).
 
     Raises
     ------
@@ -362,7 +370,9 @@ def save_confusion_matrix(
         raise ValueError("y_pred must be a list of integers (not bools).")
 
     if len(y_true) != len(y_pred):
-        raise ValueError("y_true and y_pred must be the same length.")
+        raise ValueError(
+            f"y_true and y_pred must be the same length, got {len(y_true)} and {len(y_pred)}."
+        )
 
     if not isinstance(class_names, list) or not all(
         isinstance(s, str) for s in class_names
@@ -372,11 +382,15 @@ def save_confusion_matrix(
     if not isinstance(out_folder, (str, Path)):
         raise ValueError("out_folder must be a string or pathlib.Path.")
 
+    if fold is not None:
+        if not isinstance(fold, INT_TYPES) or fold < 1:
+            raise ValueError("fold must be a positive integer if provided.")
+
     # Validate and normalize path
     out_folder = Path(out_folder)
     out_folder.mkdir(parents=True, exist_ok=True)
 
-    # The rest of the params are valideate by format_hparams below
+    # The rest of the params are validated by format_hparams below
 
     # Compute confusion matrix
     cm = ConfusionMatrixDisplay.from_predictions(
@@ -388,17 +402,24 @@ def save_confusion_matrix(
         values_format=".2f" if normalize else "d",
     )
 
-    title = (
-        f"{model} -- Normalized Confusion Matrix"
+    plot_title = (
+        f"{model}:  Normalized Confusion Matrix"
         if normalize
-        else f"{model} -- Confusion Matrix"
+        else f"{model}: Confusion Matrix"
     )
 
     plot_title = (
-        f"{title}\nLR={lr}, BS={bs}, WD={wd}"
+        f"{plot_title}\nLR={lr}, BS={bs}, WD={wd}"
         + (f", Fold={fold}" if fold is not None else "")
-        + (f", Epoch={epochs}" if epochs is not None else "")
+        + (f", Epoch={epoch}" if epoch is not None else "")
     )
+
+    title_text = "Normalized Confusion Matrix" if normalize else "Confusion Matrix"
+    title_text = _build_plot_title(
+        model, lr, bs, wd, prefix, metric=title_text, fold=fold, epoch=epoch
+    )
+    print(f"Title text:  {title_text}")
+    print(epoch)
 
     cm.ax_.set_title(plot_title)
 
@@ -408,10 +429,10 @@ def save_confusion_matrix(
         lr=lr,
         bs=bs,
         wd=wd,
-        epochs=epochs,
         prefix=prefix,
         fname_metric=fname_metric,
         fold=fold,
+        epoch=epoch,
     )
     path = out_folder / f"{filename}.png"
     cm.figure_.savefig(path)
@@ -427,7 +448,7 @@ def save_pr_threshold_curve(
     lr: float,
     bs: int,
     wd: float,
-    epochs: int,
+    epoch: int,
     prefix: str,
     fname_metric: str,
     title: str = "Precision & Recall vs Threshold",
@@ -443,25 +464,25 @@ def save_pr_threshold_curve(
     y_probs : list of float or np.ndarray
         Predicted probabilities for the positive class.
     out_folder : str or Path
-        Output folder to save the plot.
+        Folder to save output files.
     model : str
-        Model string indicates model used.
+        Model string indicates model used (e.g., "ECGConvNet").
     lr : float
         Learning rate. Must be in range [1e-6, 1.0].
     bs : int
         Batch size. Must be in range [1, 4096].
     wd : float
         Weight decay. Must be in range [0.0, 1.0].
-    epochs : int
-        Number of training epochs. Must be in range [1, 1000].
     prefix : str
-        Prefix string for filename (e.g., "best", "final").
-    fname_metric : str
-        Short descriptor for the metric (e.g., "pr_threshold").
+        Prefix string indicating model phase or purpose (e.g., "final", "best").
+    fname_metric : str, optional
+        Metric name (e.g., "loss", "accuracy") to include in filename.
     title : str, optional
-        Title to display on the plot (default = "Precision & Recall vs Threshold").
+        Plot title. Default is "Precision & Recall vs Threshold".
     fold : int | None, optional
         Fold number in cross-validation. Must be non-negative or None.
+    epoch : int or None, optional
+        Epoch number used for this plot (e.g., best epoch).
 
     Raises
     ------
@@ -486,20 +507,31 @@ def save_pr_threshold_curve(
         raise ValueError("y_probs must contain probabilities in [0.0, 1.0]")
 
     if len(y_true) != len(y_probs):
-        raise ValueError("y_true and y_probs must be the same length")
+        raise ValueError(
+            f"y_true and y_probs must be the same length, got {len(y_true)} and {len(y_probs)}."
+        )
 
     if not isinstance(out_folder, (str, Path)):
-        raise ValueError("out_folder must be a string or pathlib.Path")
+        raise ValueError(
+            f"out_folder must be a string or pathlib.Path, got {type(out_folder)}"
+        )
 
-    validate_hparams(
+    if not isinstance(title, str):
+        raise ValueError(f"title must be a string, got {type(title)}")
+
+    if fold is not None:
+        if not isinstance(fold, INT_TYPES) or fold < 1:
+            raise ValueError("fold must be a positive integer if provided.")
+
+    validate_hparams_formatting(
         model=model,
         lr=lr,
         bs=bs,
         wd=wd,
-        epochs=epochs,
         prefix=prefix,
         fname_metric=fname_metric,
         fold=fold,
+        epoch=epoch,
     )
 
     # --- Prepare output path ---
@@ -511,10 +543,10 @@ def save_pr_threshold_curve(
         lr=lr,
         bs=bs,
         wd=wd,
-        epochs=epochs,
         prefix=prefix,
         fname_metric=fname_metric,
         fold=fold,
+        epoch=epoch,
     )
     out_path = out_folder / f"{filename}.png"
 
@@ -522,13 +554,23 @@ def save_pr_threshold_curve(
     precision, recall, thresholds = precision_recall_curve(y_true, y_probs)
     thresholds = np.append(thresholds, 1.0)
 
+    # Prepate title
+
+    plot_title = f"{model}:  {title}"
+
+    plot_title = (
+        f"{plot_title}\nLR={lr}, BS={bs}, WD={wd}"
+        + (f", Fold={fold}" if fold is not None else "")
+        + (f", Epoch={epoch}" if epoch is not None else "")
+    )
+
     # --- Plot ---
     fig, ax = plt.subplots(figsize=(8, 5))
     ax.plot(thresholds, precision, label="Precision")
     ax.plot(thresholds, recall, label="Recall")
     ax.set_xlabel("Threshold")
     ax.set_ylabel("Score")
-    ax.set_title(title)
+    ax.set_title(plot_title)
     ax.legend()
     ax.grid(True)
     fig.tight_layout()
@@ -548,10 +590,10 @@ def save_classification_report(
     lr: float,
     bs: int,
     wd: float,
-    epochs: int,
     prefix: str,
     fname_metric: str,
     fold: int | None = None,
+    epoch: int | None = None,
     title: str = "Classification Report",
 ):
     """
@@ -563,28 +605,28 @@ def save_classification_report(
         True class labels.
     y_pred : list[int] or np.ndarray
         Predicted class labels.
-    class_names : list[str]
-        List of class names corresponding to label indices.
+    class_names : list of str
+        List of class labels (e.g., ["NORM", "MI", "STTC", ...]).
     out_folder : str or Path
-        Folder to save the output files.
+        Folder to save output files.
     model : str
-        Model string indicates model used.
+        Model string indicates model used (e.g., "ECGConvNet").
     lr : float
         Learning rate. Must be in range [1e-6, 1.0].
     bs : int
         Batch size. Must be in range [1, 4096].
     wd : float
         Weight decay. Must be in range [0.0, 1.0].
-    epochs : int
-        Number of training epochs. Must be in range [1, 1000].
     prefix : str
-        Filename prefix, such as 'best' or 'final'.
-    fname_metric : str
-        Short descriptor for the metric, such as 'class_report'.
-    fold : int, optionaol
-        Fold number in cross-validation. Must be non-negative or None
+        Prefix string indicating model phase or purpose (e.g., "final", "best").
+    fname_metric : str, optional
+        Metric name (e.g., "loss", "accuracy") to include in filename.
+    fold : int or None, optional
+        Fold number used in cross-validation. Must be a non-negative integer or None.
+    epoch : int or None, optional
+        Epoch number used for this plot (e.g., best epoch).
     title : str, optional
-        Plot title (default = "Classification Report").
+        Plot title. Default is "Classification Report".
 
     Raises
     ------
@@ -605,7 +647,9 @@ def save_classification_report(
         raise ValueError("y_pred must contain only integer values")
 
     if len(y_true) != len(y_pred):
-        raise ValueError("y_true and y_pred must be the same length")
+        raise ValueError(
+            f"y_true and y_pred must be the same length, got {len(y_true)} and {len(y_pred)}."
+        )
 
     if not isinstance(class_names, list) or not all(
         isinstance(c, str) for c in class_names
@@ -613,17 +657,26 @@ def save_classification_report(
         raise ValueError("class_names must be a list of strings")
 
     if not isinstance(out_folder, (str, Path)):
-        raise ValueError("out_folder must be a string or pathlib.Path")
+        raise ValueError(
+            f"out_folder must be a string or pathlib.Path, got {type(out_folder)}"
+        )
 
-    validate_hparams(
+    if not isinstance(title, str):
+        raise ValueError(f"title must be a string, got {type(title)}")
+
+    if fold is not None:
+        if not isinstance(fold, INT_TYPES) or fold < 1:
+            raise ValueError("fold must be a positive integer if provided.")
+
+    validate_hparams_formatting(
         model=model,
         lr=lr,
         bs=bs,
         wd=wd,
-        fold=fold,
-        epochs=epochs,
         prefix=prefix,
         fname_metric=fname_metric,
+        fold=fold,
+        epoch=epoch,
     )
 
     # --- Prepare output paths ---
@@ -634,10 +687,10 @@ def save_classification_report(
         lr=lr,
         bs=bs,
         wd=wd,
-        epochs=epochs,
         prefix=prefix,
         fname_metric=fname_metric,
         fold=fold,
+        epoch=epoch,
     )
     out_path_txt = out_folder / f"{fname}.txt"
     out_path_png = out_folder / f"{fname}.png"
@@ -686,12 +739,12 @@ def evaluate_and_plot(
     lr: float,
     bs: int,
     wd: float,
-    fold: int,
-    epochs: int,
     prefix: str,
     fname_metric: str,
     out_folder: str | Path,
     class_names: list[str],
+    fold: int | None = None,
+    epoch: int | None = None,
 ) -> None:
     """
     Generate evaluation plots and save classification report using standardized formatting.
@@ -711,25 +764,25 @@ def evaluate_and_plot(
     val_losses : list of float
         Validation loss values per epoch.
     model : str
-        Model string indicates model used.
+        Model string indicates model used (e.g., "ECGConvNet").
     lr : float
-        Learning rate used during training.
+        Learning rate. Must be in range [1e-6, 1.0].
     bs : int
-        Batch size.
+        Batch size. Must be in range [1, 4096].
     wd : float
-        Weight decay.
-    fold : int
-        Cross-validation fold.
-    epochs : int
-        Number of training epochs.
+        Weight decay. Must be in range [0.0, 1.0].
     prefix : str
-        Prefix to include in output filenames.
-    fname_metric : str
-        Base metric name to use in output filenames.
+        Prefix string indicating model phase or purpose (e.g., "final", "best").
+    fname_metric : str, optional
+        Metric name (e.g., "loss", "accuracy") to include in filename.
     out_folder : str or Path
-        Output folder to save all plots and reports.
+        Folder to save output files.
     class_names : list of str
-        Class names for the classification report and confusion matrix.
+        List of class labels (e.g., ["NORM", "MI", "STTC", ...]).
+    fold : int or None, optional
+        Fold number used in cross-validation. Must be a non-negative integer or None.
+    epoch : int or None, optional
+        Epoch number used for this plot (e.g., best epoch).
 
     Raises
     ------
@@ -741,11 +794,13 @@ def evaluate_and_plot(
 
     # --- Validate y_true and y_pred ---
     if not isinstance(y_true, (list, np.ndarray)):
-        raise ValueError("y_true must be list or ndarray")
+        raise ValueError(f"y_true must be list or ndarray, , got {type(y_true)}")
     if not isinstance(y_pred, (list, np.ndarray)):
-        raise ValueError("y_pred must be list or ndarray")
+        raise ValueError(f"y_pred must be list or ndarray, got {type(y_pred)}")
     if len(y_true) != len(y_pred):
-        raise ValueError("y_true and y_pred must be the same length")
+        raise ValueError(
+            f"y_true and y_pred must be the same length, got {len(y_true)} and {len(y_pred)}."
+        )
     if not all(isinstance(i, INT_TYPES) and not isinstance(i, bool) for i in y_true):
         raise ValueError("y_true must contain only integer values")
     if not all(isinstance(i, INT_TYPES) and not isinstance(i, bool) for i in y_pred):
@@ -753,7 +808,7 @@ def evaluate_and_plot(
 
     # --- Validate class_names ---
     if not isinstance(class_names, list):
-        raise ValueError("class_names must be a list of strings")
+        raise ValueError(f"class_names must be a list, got {type(class_names)}")
     if not all(isinstance(c, str) for c in class_names):
         raise ValueError("class_names must be a list of strings")
     if len(class_names) == 0:
@@ -765,17 +820,22 @@ def evaluate_and_plot(
 
     # --- Validate out_folder ---
     if not isinstance(out_folder, (str, Path)):
-        raise ValueError("out_folder must be a string or Path")
+        raise ValueError(f"out_folder must be a string or Path, got {type(out_folder)}")
     out_folder = Path(out_folder)
 
     print(
-        f"\n=== Final Evaluation (Model={model}, LR={lr}, BS={bs}, Fold={fold}, Epochs={epochs}) ==="
+        f"\n=== Final Evaluation (Model={model}, LR={lr}, BS={bs}, Fold={fold}, Epochs={epoch}) ==="
     )
 
     # --- Validate train/val metrics ---
     n_epochs = len(train_accs)
     if not (n_epochs == len(val_accs) == len(train_losses) == len(val_losses)):
         raise ValueError("Training and validation metric lists must be equal in length")
+
+    # Validate fold
+    if fold is not None:
+        if not isinstance(fold, INT_TYPES) or fold < 1:
+            raise ValueError("fold must be a positive integer if provided.")
 
     report_dir = out_folder / "reports"
     plot_dir = out_folder / "plots"
@@ -805,11 +865,10 @@ def evaluate_and_plot(
         bs=bs,
         wd=wd,
         fold=fold,
-        epochs=epochs,
         prefix=prefix,
         fname_metric="classification_report",
+        epoch=epoch,
         title="Classification Report",
-        # zero_division=0,
     )
 
     # --- Accuracy curve ---
@@ -819,15 +878,15 @@ def evaluate_and_plot(
         x_label="Epoch",
         y_label="Accuracy",
         title_metric="Accuracy",
+        out_folder=plot_dir,
         model=model,
         lr=lr,
         bs=bs,
         wd=wd,
-        fold=fold,
-        epochs=epochs,
         prefix=prefix,
         fname_metric="accuracy",
-        out_folder=plot_dir,
+        fold=fold,
+        epoch=epoch,
     )
 
     # --- Loss curve ---
@@ -837,15 +896,15 @@ def evaluate_and_plot(
         x_label="Epoch",
         y_label="Loss",
         title_metric="Loss",
+        out_folder=plot_dir,
         model=model,
         lr=lr,
         bs=bs,
         wd=wd,
-        fold=fold,
-        epochs=epochs,
         prefix=prefix,
         fname_metric="loss",
-        out_folder=plot_dir,
+        fold=fold,
+        epoch=epoch,
     )
 
     # --- Confusion matrix (normalized) ---
@@ -858,9 +917,9 @@ def evaluate_and_plot(
         lr=lr,
         bs=bs,
         wd=wd,
-        epochs=epochs,
         prefix=prefix,
         fname_metric="confusion_matrix",
         normalize=True,
         fold=fold,
+        epoch=epoch,
     )

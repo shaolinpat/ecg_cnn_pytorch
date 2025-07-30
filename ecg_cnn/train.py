@@ -1,4 +1,13 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
+"""
+train.py
+
+Main training entry point for ECG CNN models.
+
+Run with:
+    python -m ecg_cnn.train --config configs/baseline.yaml
+
+"""
 
 # --------------------------------------------------------------------------
 # Standard Library Imports
@@ -6,6 +15,7 @@
 import random
 import time
 from pathlib import Path
+import yaml
 
 # --------------------------------------------------------------------------
 # Third-Party Imports (alphabetical)
@@ -15,6 +25,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+
 from dataclasses import asdict
 from sklearn.preprocessing import LabelEncoder
 from torch.utils.data import DataLoader, TensorDataset
@@ -43,7 +54,8 @@ from ecg_cnn.paths import (
     PTBXL_DATA_DIR,
 )
 from ecg_cnn.training.cli_args import parse_args, override_config_with_args
-from ecg_cnn.training.trainer import train_one_epoch
+from ecg_cnn.training.trainer import train_one_epoch, run_training
+from ecg_cnn.utils.grid_utils import is_grid_config, expand_grid
 
 
 # --------------------------------------------------------------------------
@@ -65,138 +77,138 @@ def main():
     t0 = time.time()
     args = parse_args()
 
-    # 1. Load and merge configs
+    # 1. Load baseline/default config
     base_cfg = load_training_config(DEFAULT_TRAINING_CONFIG)
 
-    print(f"args.config: {args.config}")
+    # 2. Load and apply YAML config
     if args.config:
         override_dict = load_yaml_as_dict(Path(args.config))
-        config = merge_configs(base_cfg, override_dict)
+
+        if is_grid_config(override_dict):
+            # Expand grid values into list of config dictionaries
+            raw_grid = list(expand_grid(override_dict))  # list of dicts
+
+            # Merge each grid dict with base_cfg to ensure defaults are preserved
+            param_grid = [merge_configs(base_cfg, cfg_dict) for cfg_dict in raw_grid]
+        else:
+            # Single override case: merge directly
+            config = merge_configs(base_cfg, override_dict)
+            param_grid = [config]
     else:
-        config = base_cfg
+        param_grid = [base_cfg]
 
-    config = normalize_path_fields(config)
-    config = override_config_with_args(config, args)
+    # 3. Override using CLI arguments (if any)
+    param_grid = [override_config_with_args(cfg, args) for cfg in param_grid]
 
-    print(f"config.verbose:  {config.verbose}")
-    if config.verbose:
-        print("Effective training config:")
-        for k, v in vars(config).items():
-            print(f"  {k}: {v}")
+    # 4. Print effective configs
+    for i, config in enumerate(param_grid):
+        if config.verbose:
+            print(f"\n=== Config {i+1}/{len(param_grid)} ===")
+            for k, v in vars(config).items():
+                print(f"  {k}: {v}")
 
-    # def main():
-    #     t0 = time.time()
-    #     args = parse_args()
+    # # 1. Load and merge configs
+    # base_cfg = load_training_config(DEFAULT_TRAINING_CONFIG)
 
-    #     # --------------------------------------------------------------------------
-    #     # 1. Load and merge configs
-    #     # --------------------------------------------------------------------------
-    #     base_config = load_training_config(DEFAULT_TRAINING_CONFIG)
-
-    #     # if args.config:
-    #     #     user_config = load_training_config(Path(args.config))
-    #     #     config = merge_configs(config, user_config)
-
-    #     # if args.config:
-    #     #     override_dict = load_yaml_as_dict(Path(args.config))
-    #     #     override_cfg = TrainConfig(**override_dict)
-    #     #     config = merge_configs(config, override_cfg)
-
-    #     if args.config:
-    #         override_dict = load_yaml_as_dict(Path(args.config))
-    #         # Create TrainConfig *only after* merging
-    #         override_cfg = TrainConfig(**override_dict)
-    #         config = merge_configs(base_config, override_cfg)
+    # if args.config:
+    #     override_dict = load_yaml_as_dict(Path(args.config))
+    #     if is_grid_config(override_dict):
+    #         # Grid config detected; use base_cfg as shared defaults
+    #         raw_grid_dicts = list(expand_grid(override_dict))  # list of dicts
+    #         param_grid = [
+    #             merge_configs(base_cfg, grid_dict) for grid_dict in raw_grid_dicts
+    #         ]
     #     else:
-    #         config = base_config
+    #         # Merge override into baseline
+    #         config = merge_configs(base_cfg, override_dict)
+    #         param_grid = [config]
+    # else:
+    #     param_grid = [base_cfg]
 
-    #     # Normalize after merging (e.g., str -> Path)
-    #     config = normalize_path_fields(config)
+    # # 2. Override from CLI args (if any)
+    # param_grid = [
+    #     override_config_with_args(merge_configs(base_cfg, cfg_dict), args)
+    #     for cfg_dict in param_grid
+    # ]
 
-    #     # Apply CLI overrides
-    #     config = override_config_with_args(config, args)
-
-    #     print(f"Config file contents: {config}")
-
-    #     # print("Effective training config:")
-    #     # for k, v in vars(config).items():
-    #     #     print(f"  {k}: {v}")
-
+    # # 3. Print effective config(s)
+    # for i, config in enumerate(param_grid):
     #     if config.verbose:
-    #         print("Effective training config:")
+    #         print(f"\n=== Config {i+1}/{len(param_grid)} ===")
     #         for k, v in vars(config).items():
     #             print(f"  {k}: {v}")
 
-    # Load data
-    data_dir = Path(config.data_dir) if config.data_dir else PTBXL_DATA_DIR
-    if config.sample_only:
-        print("Loading sample data...")
-        X, y, meta = load_ptbxl_sample(
-            sample_dir=config.sample_dir,
-            ptb_path=data_dir,
+    # 5. Iterate over all configs and train
+    for i, config in enumerate(param_grid):
+        print(f"\n===== Starting training run {i+1}/{len(param_grid)} =====")
+
+        summaries = []
+
+        if config.n_folds and config.n_folds >= 2:
+            for fold_idx in range(config.n_folds):
+                print(f"\n--- Fold {fold_idx + 1}/{config.n_folds} ---")
+                summary = run_training(config, fold_idx=fold_idx)
+                summaries.append(summary)
+        else:
+            summary = run_training(config)
+            summaries.append(summary)
+
+        print(f"summary:  {summaries[0].keys()}")
+
+        # Save training summary
+        if summaries:
+            print("Config keys:", vars(config).keys())
+            summary_path = OUTPUT_DIR / "results" / f"summary_{config.model}.json"
+            summary_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(summary_path, "w") as f:
+                json.dump(summaries, f, indent=2)
+
+        # Save effective config for evaluate.py
+        config_path = OUTPUT_DIR / "results" / f"config_{config.model}.yaml"
+        with open(config_path, "w") as f:
+            yaml.dump(vars(config), f)
+
+        print(f"Saved summary to: {summary_path}")
+        print(f"Saved config to: {config_path}")
+
+        best_summary = min(summaries, key=lambda d: d["loss"])
+        print(
+            f"Best model: {best_summary['model_path']} (epoch {best_summary['best_epoch']})"
         )
-    else:
-        print("Loading full data...")
-        X, y, meta = load_ptbxl_full(
-            data_dir=data_dir,
-            subsample_frac=config.subsample_frac,
-            # subsample_frac=args.subsample_frac,
-            sampling_rate=config.sampling_rate,
-        )
 
-    print("Loaded", len(meta), "records")
+        time_spent = (time.time() - t0) / 60
+        print(f"Elapsed time: {time_spent:.2f} minutes")
 
-    # Drop unknowns
-    keep = np.array([lbl != "Unknown" for lbl in y], dtype=bool)
-    X = X[keep]
-    y = [lbl for i, lbl in enumerate(y) if keep[i]]
-    meta = meta.loc[keep].reset_index(drop=True)
+    # # 4. Iterate over all configs and train
+    # for i, config in enumerate(param_grid):
+    #     print(f"\n===== Starting training run {i+1}/{len(param_grid)} =====")
+    #     summary = run_training(config)
+    #     print(f"summary:  {summary.keys()}")
 
-    # Encode targets
-    le = LabelEncoder()
-    y_tensor = torch.tensor(le.fit_transform(y)).long()
-    X_tensor = torch.tensor(X).float()
+    #     # Save training summary
+    #     if summary:
+    #         print("Config keys:", vars(config).keys())
+    #         summary_path = OUTPUT_DIR / "results" / f"summary_{config.model}.json"
+    #         summary_path.parent.mkdir(parents=True, exist_ok=True)
+    #         with open(summary_path, "w") as f:
+    #             json.dump(summary, f, indent=2)
 
-    dataset = TensorDataset(X_tensor, y_tensor)
-    dataloader = DataLoader(dataset, batch_size=config.batch_size, shuffle=True)
+    #     # Save effective config for evaluate.py
+    #     config_path = OUTPUT_DIR / "results" / f"config_{config.model}.yaml"
+    #     with open(config_path, "w") as f:
+    #         yaml.dump(vars(config), f)
 
-    # Build model
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = ECGConvNet(num_classes=len(FIVE_SUPERCLASSES)).to(device)
+    # summary_path = OUTPUT_DIR / "results" / f"summary_{config.model}.json"
+    # summary_path.parent.mkdir(parents=True, exist_ok=True)
+    # with open(summary_path, "w") as f:
+    #     json.dump(summary, f, indent=4)
 
-    optimizer = optim.Adam(
-        model.parameters(), lr=config.lr, weight_decay=config.weight_decay
-    )
-    criterion = nn.CrossEntropyLoss()
+    # print(f"Saved summary to: {summary_path}")
+    # print(f"Saved config to: {summary_path.parent / 'config.yaml'}")
+    # print(f"Best model: {summary['model_path']} (epoch {summary['best_epoch']})")
 
-    best_loss = float("inf")
-    for epoch in range(config.epochs):
-        print(f"Epoch {epoch+1}/{config.epochs}")
-        loss = train_one_epoch(model, dataloader, optimizer, criterion, device)
-        print(f"Loss: {loss:.4f}")
-
-        if config.save_best and loss < best_loss:
-            best_loss = loss
-            MODELS_DIR.mkdir(parents=True, exist_ok=True)
-            model_path = MODELS_DIR / "model_best.pth"
-            torch.save(model.state_dict(), model_path)
-            print(f"Saved best model to: {model_path}")
-
-    # Save summary
-    elapsed = (time.time() - t0) / 60
-    summary_path = OUTPUT_DIR / "training_summary.txt"
-    summary_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(summary_path, "w") as f:
-        f.write(f"Best Loss: {best_loss:.4f}\n")
-        f.write(f"Runtime: {elapsed:.2f} minutes\n")
-    print(f"Saved training summary to: {summary_path}")
-
-    # Save the final config
-    with open(MODELS_DIR / "final_config.json", "w") as f:
-        json.dump(asdict(config), f, indent=2)
-
-    time_spent = (time.time() - t0) / 60
-    print(f"Elapsed time: {time_spent:.2f} minutes")
+    # time_spent = (time.time() - t0) / 60
+    # print(f"Elapsed time: {time_spent:.2f} minutes")
 
 
 if __name__ == "__main__":

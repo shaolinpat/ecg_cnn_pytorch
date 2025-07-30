@@ -5,7 +5,7 @@ from pathlib import Path
 
 from ecg_cnn.paths import PTBXL_DATA_DIR
 from ecg_cnn.config.config_loader import TrainConfig
-from ecg_cnn.utils.validate import validate_hparams
+from ecg_cnn.utils.validate import validate_hparams_config
 
 
 def parse_args():
@@ -75,7 +75,7 @@ def parse_args():
         help="L2 regularization strength (e.g., 0.0)",
     )
     p.add_argument(
-        "--epochs",
+        "--n_epochs",
         type=int,
         default=None,
         help="Number of training epochs",
@@ -154,6 +154,12 @@ def parse_args():
         default=None,
         help="Enable verbose output (default: off)",
     )
+    p.add_argument(
+        "--n_folds",
+        type=int,
+        default=None,
+        help="Total number of folds to use for cross-validation (e.g., 5 for 5-fold CV). Default is 1.",
+    )
 
     return p.parse_args()
 
@@ -226,7 +232,7 @@ def override_config_with_args(config: TrainConfig, args: Namespace) -> TrainConf
         "lr",
         "batch_size",
         "weight_decay",
-        "epochs",
+        "n_epochs",
         "save_best",
         "sample_only",
         "subsample_frac",
@@ -234,6 +240,7 @@ def override_config_with_args(config: TrainConfig, args: Namespace) -> TrainConf
         "data_dir",
         "sample_dir",
         "verbose",
+        "n_folds",
     ]
 
     for field in override_fields:
@@ -243,18 +250,16 @@ def override_config_with_args(config: TrainConfig, args: Namespace) -> TrainConf
                 setattr(config, field, value)
 
     # Validate core numeric and structural parameters using shared logic
-    validate_hparams(
+    validate_hparams_config(
         model=config.model,
         lr=config.lr,
         bs=config.batch_size,
         wd=config.weight_decay,
-        fold=0,  # Override caller can hardcode fold if unused
-        epochs=config.epochs,
-        prefix="cli",  # Dummy string to satisfy validation
-        fname_metric=None,
+        n_epochs=config.n_epochs,
+        n_folds=config.n_folds,
     )
 
-    # Additional checks for fields not covered by validate_hparams
+    # Additional checks for fields not covered by validate_hparams_config
     if not (0.0 < config.subsample_frac <= 1.0):
         raise ValueError(
             f"subsample_frac must be in (0.0, 1.0], got {config.subsample_frac}"

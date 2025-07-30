@@ -14,6 +14,7 @@ PTBXL_DATA_DIR = (
 OUTPUT_DIR = PROJECT_ROOT / "outputs"
 PLOTS_DIR = OUTPUT_DIR / "plots"
 MODELS_DIR = OUTPUT_DIR / "models"
+HISTORY_DIR = OUTPUT_DIR / "history"
 RESULTS_CSV = OUTPUT_DIR / "results" / "results_summary_pytorch.csv"
 
 # Path to the default training configuration

@@ -36,7 +36,7 @@ def test_finalize_normalizes_flags_and_paths():
         lr=0.001,
         batch_size=32,
         weight_decay=0.0,
-        epochs=5,
+        n_epochs=3,
         save_best=None,
         sample_only=None,
         subsample_frac=0.2,
@@ -49,6 +49,8 @@ def test_finalize_normalizes_flags_and_paths():
     assert cfg.save_best is False
     assert cfg.sample_only is False
     assert cfg.verbose is False
+    assert cfg.n_epochs == 3
+    assert cfg.n_folds == 1
     assert isinstance(cfg.data_dir, Path)
     assert isinstance(cfg.sample_dir, Path)
 
@@ -64,19 +66,22 @@ def test_load_training_config_success():
         "lr": 0.001,
         "batch_size": 64,
         "weight_decay": 0.0,
-        "epochs": 10,
+        "n_epochs": 10,
         "save_best": True,
         "sample_only": False,
         "subsample_frac": 1.0,
         "sampling_rate": 100,
         "data_dir": "/data",
         "sample_dir": "/samples",
+        "n_folds": 66,
     }
     path = make_temp_yaml(config_data)
     config = load_training_config(path)
     assert isinstance(config, TrainConfig)
     assert config.model == "ECGConvNet"
     assert config.lr == 0.001
+    assert config.n_epochs == 10
+    assert config.n_folds == 66
 
 
 def test_load_training_config_file_not_found():
@@ -132,7 +137,7 @@ def test_load_training_config_returns_raw_when_not_strict(tmp_path):
         "model": "ECGConvNet",
         "lr": 0.001,
         "weight_decay": 0.0001,
-        "epochs": 10,
+        "n_epochs": 10,
         "batch_size": 32,
         "subsample_frac": 0.2,
         "sampling_rate": 500,
@@ -168,7 +173,7 @@ def base_cfg():
         lr=0.001,
         batch_size=64,
         weight_decay=0.0,
-        epochs=10,
+        n_epochs=10,
         save_best=True,
         sample_only=False,
         subsample_frac=1.0,
@@ -176,29 +181,28 @@ def base_cfg():
         data_dir=None,
         sample_dir=None,
         verbose=False,
+        n_folds=1,
     )
 
 
 def test_merge_configs_partial_override():
     override = TrainConfig(
-        model=None,
+        model="Base",
         lr=0.01,
-        batch_size=None,
-        weight_decay=None,
-        epochs=None,
-        save_best=None,
-        sample_only=None,
+        batch_size=128,
+        weight_decay=0.0,
+        n_epochs=3,
+        save_best=True,
+        sample_only=True,
         subsample_frac=0.2,
-        sampling_rate=None,
-        data_dir=None,
+        sampling_rate=500,
+        data_dir="data_dir",
         sample_dir=None,
-        verbose=None,
     )
     merged = merge_configs(base_cfg(), override)
     assert merged.lr == 0.01
     assert merged.subsample_frac == 0.2
-    assert merged.model == "ECGConvNet"  # unchanged
-    assert merged.batch_size == 64  # unchanged
+    assert merged.verbose == False
 
 
 def test_merge_configs_all_overrides():
@@ -207,7 +211,7 @@ def test_merge_configs_all_overrides():
         lr=0.005,
         batch_size=128,
         weight_decay=0.01,
-        epochs=20,
+        n_epochs=20,
         save_best=False,
         sample_only=True,
         subsample_frac=0.5,
@@ -215,11 +219,13 @@ def test_merge_configs_all_overrides():
         data_dir="/mnt/data",
         sample_dir="samples/alt",
         verbose=True,
+        n_folds=3,
     )
     merged = merge_configs(base_cfg(), override)
     assert merged.model == "AltModel"
     assert merged.verbose is True
     assert merged.save_best is False
+    assert merged.n_folds == 3
 
 
 def test_merge_configs_raises_on_non_trainconfig_inputs():

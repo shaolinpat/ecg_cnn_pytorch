@@ -14,7 +14,7 @@ from ecg_cnn.utils.plot_utils import (
     save_classification_report,
     evaluate_and_plot,
 )
-from ecg_cnn.utils.validate import validate_hparams
+from ecg_cnn.utils.validate import validate_hparams_formatting
 
 
 # ------------------------------------------------------------------------------
@@ -26,7 +26,7 @@ def default_hparam_kwargs():
         lr=0.001,
         bs=64,
         wd=0.0,
-        epochs=10,
+        epoch=10,
         prefix="test",
         fname_metric="some_metric",
         fold=1,
@@ -41,35 +41,55 @@ def default_hparam_kwargs():
 
 def test_build_plot_title_valid():
     result = _build_plot_title(
-        model="SomeModel", lr=0.001, bs=32, wd=0.01, fold=2, metric="Accuracy"
+        model="SomeModel",
+        lr=0.001,
+        bs=32,
+        wd=0.01,
+        fold=2,
+        prefix="prefix",
+        metric="Accuracy",
     )
-    assert result == "SomeModel: Accuracy by Epoch\nLR=0.001, BS=32, WD=0.01, Fold=2"
+    print(result)
+    assert result == "SomeModel: Accuracy\nLR=0.001, BS=32, WD=0.01, Fold=2"
 
 
 def test_build_plot_title_invalid_lr():
     with pytest.raises(ValueError, match="Learning rate must be positive"):
         _build_plot_title(
-            model="SomeModel", lr=-0.001, bs=32, wd=0.01, fold=2, metric="Accuracy"
+            model="SomeModel",
+            lr=-0.001,
+            bs=32,
+            wd=0.01,
+            prefix="test",
+            fold=2,
+            metric="Accuracy",
         )
 
 
 def test_build_plot_title_invalid_metric_type():
-    with pytest.raises(ValueError, match="Metric name must be a string"):
+    with pytest.raises(ValueError, match="fname_metric must be a string"):
         _build_plot_title(
-            model="SomeModel", lr=0.001, bs=32, wd=0.01, fold=2, metric=123
+            model="SomeModel",
+            lr=0.001,
+            bs=32,
+            wd=0.01,
+            prefix="test",
+            fold=2,
+            metric=123,
         )
 
 
 # ------------------------------------------------------------------------------
 # def format_hparams(
+#     *,
 #     model: str,
 #     lr: float,
 #     bs: int,
 #     wd: float,
-#     fold: int,
-#     epochs: int,
 #     prefix: str,
 #     fname_metric: str = "",
+#     fold: int | None = None,
+#     epoch: int | None = None,
 # ) -> str:
 # ------------------------------------------------------------------------------
 def test_format_hparams_lr_many_decimal_places():
@@ -79,7 +99,7 @@ def test_format_hparams_lr_many_decimal_places():
         bs=32,
         wd=0.0009876543,
         fold=2,
-        epochs=3,
+        epoch=3,
         prefix="final",
     )
     assert "lr000123" in result and "wd000988" in result
@@ -92,7 +112,7 @@ def test_format_hparams_basic():
         bs=32,
         wd=0.0001,
         fold=2,
-        epochs=3,
+        epoch=3,
         prefix="final",
         fname_metric="accuracy",
     )
@@ -105,11 +125,10 @@ def test_format_hparams_no_metric():
         lr=0.001,
         bs=32,
         wd=0.0001,
-        fold=2,
-        epochs=3,
+        epoch=3,
         prefix="best",
     )
-    assert result == "best_SomeModel_lr001_bs32_wd0001_fold2_epoch3"
+    assert result == "best_SomeModel_lr001_bs32_wd0001_epoch3"
 
 
 def test_format_hparams_trim_zeros():
@@ -119,7 +138,7 @@ def test_format_hparams_trim_zeros():
         bs=32,
         wd=0.000100,
         fold=2,
-        epochs=3,
+        epoch=3,
         prefix="best",
     )
     assert result == "best_SomeModel_lr001_bs32_wd0001_fold2_epoch3"
@@ -132,7 +151,7 @@ def test_format_hparams_lr_bottom_range_ok():
         bs=128,
         wd=1,
         fold=1,
-        epochs=5,
+        epoch=5,
         prefix="test",
         fname_metric="loss",
     )
@@ -146,7 +165,7 @@ def test_format_hparams_lr_top_range_ok_int():
         bs=128,
         wd=1,
         fold=1,
-        epochs=5,
+        epoch=5,
         prefix="test",
         fname_metric="loss",
     )
@@ -160,7 +179,7 @@ def test_format_hparams_lr_top_range_ok_float():
         bs=128,
         wd=1,
         fold=1,
-        epochs=5,
+        epoch=5,
         prefix="test",
         fname_metric="loss",
     )
@@ -174,7 +193,7 @@ def test_format_hparams_bs_bottom_range():
         bs=1,
         wd=0.0,
         fold=1,
-        epochs=5,
+        epoch=5,
         prefix="test",
         fname_metric="loss",
     )
@@ -188,7 +207,7 @@ def test_format_hparams_bs_top_range():
         bs=4096,
         wd=0.0,
         fold=1,
-        epochs=5,
+        epoch=5,
         prefix="test",
         fname_metric="loss",
     )
@@ -202,7 +221,7 @@ def test_format_hparams_wd_zero_ok():
         bs=128,
         wd=0.0,
         fold=1,
-        epochs=5,
+        epoch=5,
         prefix="test",
         fname_metric="loss",
     )
@@ -216,7 +235,7 @@ def test_format_hparams_wd_one_ok():
         bs=128,
         wd=1.0,
         fold=1,
-        epochs=5,
+        epoch=5,
         prefix="test",
         fname_metric="loss",
     )
@@ -230,7 +249,7 @@ def test_format_hparams_wd_zero_int_ok():
         bs=128,
         wd=0,
         fold=1,
-        epochs=5,
+        epoch=5,
         prefix="test",
         fname_metric="loss",
     )
@@ -244,49 +263,49 @@ def test_format_hparams_wd_one_int_ok():
         bs=128,
         wd=1,
         fold=1,
-        epochs=5,
+        epoch=5,
         prefix="test",
         fname_metric="loss",
     )
     assert "_wd1_" in result
 
 
-def test_format_hparams_fold_zero():
+def test_format_hparams_fold_high():
     result = format_hparams(
         model="SomeModel",
         lr=0.001,
         bs=128,
         wd=0.1,
-        fold=0,
-        epochs=5,
+        fold=10000,
+        epoch=5,
         prefix="test",
         fname_metric="loss",
     )
-    assert "_fold0_" in result
+    assert "_fold10000_" in result
 
 
-def test_format_hparams_epochs_bottom_of_range():
+def test_format_hparams_epoch_bottom_of_range():
     result = format_hparams(
         model="SomeModel",
         lr=0.001,
         bs=128,
         wd=0.1,
-        fold=0,
-        epochs=1,
+        fold=60,
+        epoch=1,
         prefix="test",
         fname_metric="loss",
     )
     assert "_epoch1" in result
 
 
-def test_format_hparams_epochs_top_of_range():
+def test_format_hparams_epoch_top_of_range():
     result = format_hparams(
         model="SomeModel",
         lr=0.001,
         bs=128,
         wd=0.1,
-        fold=0,
-        epochs=1000,
+        fold=30,
+        epoch=1000,
         prefix="test",
         fname_metric="loss",
     )
@@ -299,8 +318,8 @@ def test_format_hparams_prefix_lower_cased():
         lr=0.001,
         bs=128,
         wd=0.1,
-        fold=0,
-        epochs=1,
+        fold=30,
+        epoch=1,
         prefix="TEST",
         fname_metric="loss",
     )
@@ -313,8 +332,8 @@ def test_format_hparams_fname_metric_empty_string_ok():
         lr=0.001,
         bs=128,
         wd=0.1,
-        fold=0,
-        epochs=1,
+        fold=20,
+        epoch=1,
         prefix="test",
         fname_metric="",
     )
@@ -323,7 +342,7 @@ def test_format_hparams_fname_metric_empty_string_ok():
 
 def test_format_hparams_fname_metric_missing_ok():
     result = format_hparams(
-        model="SomeModel", lr=0.001, bs=128, wd=0.1, fold=0, epochs=1, prefix="test"
+        model="SomeModel", lr=0.001, bs=128, wd=0.1, fold=10, epoch=1, prefix="test"
     )
     print(result)
     assert "SomeModel_lr" in result
@@ -335,8 +354,8 @@ def test_format_hparams_fname_metric_lower_cased():
         lr=0.001,
         bs=128,
         wd=0.1,
-        fold=0,
-        epochs=1,
+        fold=3,
+        epoch=1,
         prefix="test",
         fname_metric="LOSS",
     )
@@ -355,7 +374,7 @@ def test_format_hparams_keyword_only():
         lr=0.001,
         bs=64,
         wd=0.0,
-        epochs=10,
+        epoch=10,
         prefix="test",
         fname_metric="metric",
         fold=1,
@@ -376,13 +395,14 @@ def test_format_hparams_keyword_only():
 #     y_label: str,
 #     title_metric: str,
 #     out_folder: str | Path,
+#     model: str,
 #     lr: float,
 #     bs: int,
 #     wd: float,
-#     fold: int,
-#     epochs: int,
 #     prefix: str,
 #     fname_metric: str,
+#     fold: int | None = None,
+#     epoch: int | None = None,
 # ):
 # ------------------------------------------------------------------------------
 
@@ -449,7 +469,8 @@ def test_save_plot_curves_length_mismatch_x_y():
 
 
 @pytest.mark.parametrize(
-    "param", ["x_label", "y_label", "title_metric", "fname_metric", "prefix"]
+    "param",
+    ["x_label", "y_label", "title_metric", "prefix"],
 )
 def test_save_plot_curves_bad_string_inputs(param):
     kwargs = dict(
@@ -515,14 +536,15 @@ def test_save_plot_curves_invalid_out_folder_type_raises():
 #     y_pred: list[int],
 #     class_names: list[str],
 #     out_folder: str | Path,
+#     model: str,
 #     lr: float,
 #     bs: int,
 #     wd: float,
-#     fold: int,
-#     epochs: int,
 #     prefix: str,
 #     fname_metric: str,
 #     normalize: bool = True,
+#     fold: int | None = None,
+#     epoch: int | None = None,
 # ):
 # ------------------------------------------------------------------------------
 
@@ -546,6 +568,47 @@ def test_save_confusion_matrix_valid():
     files = list(out_dir.glob("*.png"))
     assert len(files) == 1
     assert "some_metric" in files[0].name
+
+
+def test_save_confusion_matrix_valid_normalize_false():
+    y_true = [0, 1, 2, 2, 1]
+    y_pred = [0, 2, 1, 2, 1]
+    class_names = ["A", "B", "C"]
+    out_dir = Path(tempfile.mkdtemp())
+    default_hparams = default_hparam_kwargs()
+
+    save_confusion_matrix(
+        y_true=y_true,
+        y_pred=y_pred,
+        class_names=class_names,
+        out_folder=out_dir,
+        **default_hparams,
+        normalize=False,
+    )
+
+    files = list(out_dir.glob("*.png"))
+    assert len(files) == 1
+    assert "Normalized" not in files[0].name
+
+
+def test_save_confusion_matrix_valid_fold_not_present():
+    out_dir = Path(tempfile.mkdtemp())
+    save_confusion_matrix(
+        y_true=[0, 1, 2],
+        y_pred=[0, 1, 2],
+        class_names=["A", "B", "C"],
+        out_folder=out_dir,
+        model="SomeModel",
+        lr=0.001,
+        bs=64,
+        wd=0.0,
+        epoch=10,
+        prefix="test",
+        fname_metric="some_metric",
+    )
+    files = list(out_dir.glob("*.png"))
+    assert len(files) == 1
+    assert "fold" not in files[0].name
 
 
 @pytest.mark.parametrize(
@@ -619,19 +682,60 @@ def test_save_confusion_matrix_invalid_out_folder():
         )
 
 
+def test_save_confusion_matrix_fold_too_small():
+    with pytest.raises(
+        ValueError, match="fold must be a positive integer if provided."
+    ):
+        save_confusion_matrix(
+            y_true=[0, 1, 2],
+            y_pred=[0, 1, 2],
+            class_names=["A", "B", "C"],
+            out_folder="out_folder",
+            model="SomeModel",
+            lr=0.001,
+            bs=64,
+            wd=0.0,
+            epoch=10,
+            prefix="test",
+            fname_metric="some_metric",
+            fold=0,
+        )
+
+
+def test_save_confusion_matrix_fold_not_int():
+    with pytest.raises(
+        ValueError, match="fold must be a positive integer if provided."
+    ):
+        save_confusion_matrix(
+            y_true=[0, 1, 2],
+            y_pred=[0, 1, 2],
+            class_names=["A", "B", "C"],
+            out_folder="out_folder",
+            model="SomeModel",
+            lr=0.001,
+            bs=64,
+            wd=0.0,
+            epoch=10,
+            prefix="test",
+            fname_metric="some_metric",
+            fold="2",
+        )
+
+
 # ------------------------------------------------------------------------------
 # def save_pr_threshold_curve(
 #     y_true: list[int] | np.ndarray,
 #     y_probs: list[float] | np.ndarray,
 #     out_folder: str | Path,
+#     model: str,
 #     lr: float,
 #     bs: int,
 #     wd: float,
-#     fold: int,
-#     epochs: int,
+#     epoch: int,
 #     prefix: str,
 #     fname_metric: str,
 #     title: str = "Precision & Recall vs Threshold",
+#     fold: int | None = None,
 # ):
 # ------------------------------------------------------------------------------
 
@@ -805,13 +909,14 @@ def test_save_pr_threshold_curve_invalid_outfolder(tmp_path):
 #     y_pred: list[int] | np.ndarray,
 #     class_names: list[str],
 #     out_folder: str | Path,
+#     model: str,
 #     lr: float,
 #     bs: int,
 #     wd: float,
-#     fold: int,
-#     epochs: int,
 #     prefix: str,
 #     fname_metric: str,
+#     fold: int | None = None,
+#     epoch: int | None = None,
 #     title: str = "Classification Report",
 # ):
 # ------------------------------------------------------------------------------
@@ -980,15 +1085,16 @@ def test_save_classification_report_invalid_out_folder(bad_out):
 #     val_accs: list[float],
 #     train_losses: list[float],
 #     val_losses: list[float],
+#     model: str,
 #     lr: float,
 #     bs: int,
 #     wd: float,
-#     fold: int,
-#     epochs: int,
 #     prefix: str,
 #     fname_metric: str,
 #     out_folder: str | Path,
 #     class_names: list[str],
+#     fold: int | None = None,
+#     epoch: int | None = None,
 # ) -> None:
 # ------------------------------------------------------------------------------
 
@@ -1021,7 +1127,7 @@ def test_evaluate_and_plot_success(tmp_path):
         bs=hparams["bs"],
         wd=hparams["wd"],
         fold=hparams["fold"],
-        epochs=hparams["epochs"],
+        epoch=hparams["epoch"],
         prefix=hparams["prefix"],
         fname_metric="classification_report",
     )
@@ -1103,10 +1209,10 @@ def test_evaluate_and_plot_invalid_y_pred(bad_val, err_msg, tmp_path):
 @pytest.mark.parametrize(
     "bad_val, err_msg",
     [
-        (None, "class_names must be a list of strings"),
-        (123, "class_names must be a list of strings"),
+        (None, "class_names must be a list"),
+        (123, "class_names must be a list"),
         ([], "class_names cannot be empty"),
-        ([0, 1], "class_names must be a list of strings"),
+        ([0, 1], "class_names must be a list"),
     ],
 )
 def test_evaluate_and_plot_invalid_class_names(bad_val, err_msg, tmp_path):
