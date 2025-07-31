@@ -50,10 +50,10 @@ def validate_hparams_config(
         raise ValueError(
             f"Weight decay must be int or float in range [0.0, 1.0]. Got: {wd}"
         )
-    if not isinstance(n_epochs, int) or not (1 <= n_epochs <= 1000):
-        raise ValueError(f"n_epochs must be in [1, 1000]. Got: {n_epochs}")
     if not isinstance(n_folds, int) or n_folds < 1:
         raise ValueError(f"n_folds must be a positive integer. Got: {n_folds}")
+    if not isinstance(n_epochs, int) or not (1 <= n_epochs <= 1000):
+        raise ValueError(f"n_epochs must be int in range [1, 1000]. Got: {n_epochs}")
 
 
 def validate_hparams_formatting(

@@ -34,8 +34,16 @@ def default_hparam_kwargs():
 
 
 # ------------------------------------------------------------------------------
-# def _build_plot_title(metric: str, lr: float, bs: int, wd: float, fold: int)
-#     -> str:
+# def _build_plot_title(
+#     model: str,
+#     lr: float,
+#     bs: int,
+#     wd: float,
+#     prefix: str,
+#     metric: str | None = None,
+#     fold: int | None = None,
+#     epoch: int | None = None,
+# ) -> str:
 # ------------------------------------------------------------------------------
 
 
@@ -51,6 +59,20 @@ def test_build_plot_title_valid():
     )
     print(result)
     assert result == "SomeModel: Accuracy\nLR=0.001, BS=32, WD=0.01, Fold=2"
+
+
+def test_build_plot_title_valid_metric_is_none():
+    result = _build_plot_title(
+        model="SomeModel",
+        lr=0.001,
+        bs=32,
+        wd=0.01,
+        fold=2,
+        prefix="prefix",
+        metric=None,
+    )
+    print(result)
+    assert result == "SomeModel: Metric\nLR=0.001, BS=32, WD=0.01, Fold=2"
 
 
 def test_build_plot_title_invalid_lr():
@@ -366,7 +388,6 @@ def test_format_hparams_keyword_only():
     """
     Ensure that format_hparams() enforces keyword-only arguments beyond the first three.
     """
-    from ecg_cnn.utils.plot_utils import format_hparams
 
     # Valid usage (all keyword arguments)
     result = format_hparams(
@@ -903,6 +924,24 @@ def test_save_pr_threshold_curve_invalid_outfolder(tmp_path):
         )
 
 
+def test_save_pr_threshold_curve_title_not_string(tmp_path):
+    y_true = [1, 1, 0]
+    y_probs = [0.1, 0.3, 0.3]
+
+    out_folder = "tmp/folder"
+    default_hparams = default_hparam_kwargs()
+    title = "Test PR Threshold Curve"
+
+    with pytest.raises(ValueError, match="title must be a string"):
+        save_pr_threshold_curve(
+            y_true=y_true,
+            y_probs=y_probs,
+            out_folder=out_folder,
+            **default_hparams,
+            title=3,
+        )
+
+
 # ------------------------------------------------------------------------------
 # def save_classification_report(
 #     y_true: list[int] | np.ndarray,
@@ -1074,6 +1113,26 @@ def test_save_classification_report_invalid_out_folder(bad_out):
             class_names=class_names,
             out_folder=bad_out,
             **hparams,
+        )
+
+
+# ------------------------------------------------------------------------------
+# Invalid title
+# ------------------------------------------------------------------------------
+def test_save_classification_report_title_not_string():
+    y_true = [0, 1]
+    y_pred = [0, 1]
+    class_names = ["A", "B"]
+    hparams = default_hparam_kwargs()
+
+    with pytest.raises(ValueError, match="title must be a string"):
+        save_classification_report(
+            y_true=y_true,
+            y_pred=y_pred,
+            class_names=class_names,
+            out_folder="tmp/out",
+            **hparams,
+            title=3,
         )
 
 
@@ -1265,4 +1324,98 @@ def test_evaluate_and_plot_mismatched_metrics(tmp_path):
             out_folder=tmp_path,
             class_names=class_names,
             **hparams,
+        )
+
+
+def test_evaluate_and_plot_fold_is_none(tmp_path):
+    # does not raise
+    evaluate_and_plot(
+        y_true=[0, 1, 0],
+        y_pred=[0, 1, 1],
+        train_accs=dummy_accs,
+        val_accs=dummy_accs,
+        train_losses=dummy_losses,
+        val_losses=dummy_losses,
+        out_folder=tmp_path,
+        class_names=class_names,
+        model="SomeModel",
+        lr=0.001,
+        bs=64,
+        wd=0.0,
+        epoch=10,
+        prefix="test",
+        fname_metric="some_metric",
+        fold=None,
+    )
+
+
+def test_evaluate_and_plot_fold_not_int(tmp_path):
+    with pytest.raises(
+        ValueError, match="fold must be a positive integer if provided."
+    ):
+        evaluate_and_plot(
+            y_true=[0, 1, 0],
+            y_pred=[0, 1, 1],
+            train_accs=dummy_accs,
+            val_accs=dummy_accs,
+            train_losses=dummy_losses,
+            val_losses=dummy_losses,
+            out_folder=tmp_path,
+            class_names=class_names,
+            model="SomeModel",
+            lr=0.001,
+            bs=64,
+            wd=0.0,
+            epoch=10,
+            prefix="test",
+            fname_metric="some_metric",
+            fold="0",
+        )
+
+
+def test_evaluate_and_plot_fold_not_int_but_float(tmp_path):
+    with pytest.raises(
+        ValueError, match="fold must be a positive integer if provided."
+    ):
+        evaluate_and_plot(
+            y_true=[0, 1, 0],
+            y_pred=[0, 1, 1],
+            train_accs=dummy_accs,
+            val_accs=dummy_accs,
+            train_losses=dummy_losses,
+            val_losses=dummy_losses,
+            out_folder=tmp_path,
+            class_names=class_names,
+            model="SomeModel",
+            lr=0.001,
+            bs=64,
+            wd=0.0,
+            epoch=10,
+            prefix="test",
+            fname_metric="some_metric",
+            fold=6.0,
+        )
+
+
+def test_evaluate_and_plot_fold_too_small(tmp_path):
+    with pytest.raises(
+        ValueError, match="fold must be a positive integer if provided."
+    ):
+        evaluate_and_plot(
+            y_true=[0, 1, 0],
+            y_pred=[0, 1, 1],
+            train_accs=dummy_accs,
+            val_accs=dummy_accs,
+            train_losses=dummy_losses,
+            val_losses=dummy_losses,
+            out_folder=tmp_path,
+            class_names=class_names,
+            model="SomeModel",
+            lr=0.001,
+            bs=64,
+            wd=0.0,
+            epoch=10,
+            prefix="test",
+            fname_metric="some_metric",
+            fold=0,
         )

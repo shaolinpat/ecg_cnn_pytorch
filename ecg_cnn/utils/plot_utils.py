@@ -519,10 +519,6 @@ def save_pr_threshold_curve(
     if not isinstance(title, str):
         raise ValueError(f"title must be a string, got {type(title)}")
 
-    if fold is not None:
-        if not isinstance(fold, INT_TYPES) or fold < 1:
-            raise ValueError("fold must be a positive integer if provided.")
-
     validate_hparams_formatting(
         model=model,
         lr=lr,
@@ -663,10 +659,6 @@ def save_classification_report(
 
     if not isinstance(title, str):
         raise ValueError(f"title must be a string, got {type(title)}")
-
-    if fold is not None:
-        if not isinstance(fold, INT_TYPES) or fold < 1:
-            raise ValueError("fold must be a positive integer if provided.")
 
     validate_hparams_formatting(
         model=model,
@@ -836,6 +828,17 @@ def evaluate_and_plot(
     if fold is not None:
         if not isinstance(fold, INT_TYPES) or fold < 1:
             raise ValueError("fold must be a positive integer if provided.")
+
+    validate_hparams_formatting(
+        model=model,
+        lr=lr,
+        bs=bs,
+        wd=wd,
+        prefix=prefix,
+        fname_metric=fname_metric,
+        fold=fold,
+        epoch=epoch,
+    )
 
     report_dir = out_folder / "reports"
     plot_dir = out_folder / "plots"
