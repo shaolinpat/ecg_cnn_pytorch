@@ -52,6 +52,7 @@ from ecg_cnn.paths import (
     OUTPUT_DIR,
     PROJECT_ROOT,
     PTBXL_DATA_DIR,
+    RESULTS_DIR,
 )
 from ecg_cnn.training.cli_args import parse_args, override_config_with_args
 from ecg_cnn.training.trainer import train_one_epoch, run_training
@@ -107,108 +108,125 @@ def main():
             for k, v in vars(config).items():
                 print(f"  {k}: {v}")
 
-    # # 1. Load and merge configs
-    # base_cfg = load_training_config(DEFAULT_TRAINING_CONFIG)
-
-    # if args.config:
-    #     override_dict = load_yaml_as_dict(Path(args.config))
-    #     if is_grid_config(override_dict):
-    #         # Grid config detected; use base_cfg as shared defaults
-    #         raw_grid_dicts = list(expand_grid(override_dict))  # list of dicts
-    #         param_grid = [
-    #             merge_configs(base_cfg, grid_dict) for grid_dict in raw_grid_dicts
-    #         ]
-    #     else:
-    #         # Merge override into baseline
-    #         config = merge_configs(base_cfg, override_dict)
-    #         param_grid = [config]
-    # else:
-    #     param_grid = [base_cfg]
-
-    # # 2. Override from CLI args (if any)
-    # param_grid = [
-    #     override_config_with_args(merge_configs(base_cfg, cfg_dict), args)
-    #     for cfg_dict in param_grid
-    # ]
-
-    # # 3. Print effective config(s)
-    # for i, config in enumerate(param_grid):
-    #     if config.verbose:
-    #         print(f"\n=== Config {i+1}/{len(param_grid)} ===")
-    #         for k, v in vars(config).items():
-    #             print(f"  {k}: {v}")
-
     # 5. Iterate over all configs and train
+    all_summaries = []
+
     for i, config in enumerate(param_grid):
         print(f"\n===== Starting training run {i+1}/{len(param_grid)} =====")
+
+        tag = f"{config.model}_lr{config.lr}_bs{config.batch_size}_wd{config.weight_decay}".replace(
+            ".", ""
+        )
+        config.tag = tag
 
         summaries = []
 
         if config.n_folds and config.n_folds >= 2:
             for fold_idx in range(config.n_folds):
                 print(f"\n--- Fold {fold_idx + 1}/{config.n_folds} ---")
-                summary = run_training(config, fold_idx=fold_idx)
+                summary = run_training(config, fold_idx=fold_idx, tag=tag)
                 summaries.append(summary)
         else:
-            summary = run_training(config)
+            summary = run_training(config, tag=tag)
             summaries.append(summary)
 
-        print(f"summary:  {summaries[0].keys()}")
+        print(f"summaries[0].keys(): {summaries[0].keys()}")
+        print(f"summaries:  {summaries}")
 
         # Save training summary
-        if summaries:
-            print("Config keys:", vars(config).keys())
-            summary_path = OUTPUT_DIR / "results" / f"summary_{config.model}.json"
-            summary_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(summary_path, "w") as f:
-                json.dump(summaries, f, indent=2)
+        summary_path = RESULTS_DIR / f"summary_{config.tag}.json"
+        summary_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(summary_path, "w") as f:
+            json.dump(summaries, f, indent=2)
 
-        # Save effective config for evaluate.py
-        config_path = OUTPUT_DIR / "results" / f"config_{config.model}.yaml"
+        # Save config used for this tag
+        config_path = RESULTS_DIR / f"config_{config.tag}.yaml"
         with open(config_path, "w") as f:
             yaml.dump(vars(config), f)
 
         print(f"Saved summary to: {summary_path}")
         print(f"Saved config to: {config_path}")
 
-        best_summary = min(summaries, key=lambda d: d["loss"])
+        # Add all folds to overall results
+        all_summaries.extend(summaries)
+
+    # ----------------------------------------------------------
+    # Select best summary across all configs/folds (after loop)
+    # ----------------------------------------------------------
+    if all_summaries:
+        best_summary = min(all_summaries, key=lambda d: d["loss"])
         print(
-            f"Best model: {best_summary['model_path']} (epoch {best_summary['best_epoch']})"
+            f"\nBest model: {best_summary['model_path']} (epoch {best_summary['best_epoch']})"
         )
+
+        # best_tag = (
+        #     Path(best_summary["model_path"])
+        #     .stem.replace("model_best_", "")
+        #     .replace(f"_fold{best_summary['fold']}", "")
+        # )
+
+        # with open(RESULTS_DIR / "best_tag.txt", "w") as f:
+        #     f.write(best_tag)
+        # print(f"Saved best tag: {best_tag} to best_tag.txt")
+
+        # # 5. Iterate over all configs and train
+        # all_summaries = []
+
+        # for i, config in enumerate(param_grid):
+        #     print(f"\n===== Starting training run {i+1}/{len(param_grid)} =====")
+
+        #     tag = f"{config.model}_lr{config.lr}_bs{config.batch_size}_wd{config.weight_decay}".replace(
+        #         ".", ""
+        #     )
+        #     config.tag = tag
+
+        #     summaries = []
+
+        #     if config.n_folds and config.n_folds >= 2:
+        #         for fold_idx in range(config.n_folds):
+        #             print(f"\n--- Fold {fold_idx + 1}/{config.n_folds} ---")
+        #             summary = run_training(config, fold_idx=fold_idx)
+        #             summaries.append(summary)
+        #     else:
+        #         summary = run_training(config)
+        #         summaries.append(summary)
+
+        #     print(f"summaries[0].keys(): {summaries[0].keys()}")
+        #     print(f"summaries:  {summaries}")
+
+        #     # Save training summary
+        #     if summaries:
+        #         print("Config keys:", vars(config).keys())
+        #         summary_path = OUTPUT_DIR / "results" / f"summary_{config.model}.json"
+        #         summary_path.parent.mkdir(parents=True, exist_ok=True)
+        #         with open(summary_path, "w") as f:
+        #             json.dump(summaries, f, indent=2)
+
+        #     # Save effective config for evaluate.py
+        #     config_path = OUTPUT_DIR / "results" / f"config_{config.model}.yaml"
+        #     with open(config_path, "w") as f:
+        #         yaml.dump(vars(config), f)
+
+        #     print(f"Saved summary to: {summary_path}")
+        #     print(f"Saved config to: {config_path}")
+
+        #     best_summary = min(summaries, key=lambda d: d["loss"])
+        #     print(
+        #         f"Best model: {best_summary['model_path']} (epoch {best_summary['best_epoch']})"
+        #     )
+
+        #     best_tag = (
+        #         Path(best_summary["model_path"])
+        #         .stem.replace("model_best_", "")
+        #         .replace(f"_fold{best_summary['fold']}", "")
+        #     )
+
+        #     # Save best tag to file for downstream scripts
+        #     with open(RESULTS_DIR / "best_tag.txt", "w") as f:
+        #         f.write(best_tag)
 
         time_spent = (time.time() - t0) / 60
         print(f"Elapsed time: {time_spent:.2f} minutes")
-
-    # # 4. Iterate over all configs and train
-    # for i, config in enumerate(param_grid):
-    #     print(f"\n===== Starting training run {i+1}/{len(param_grid)} =====")
-    #     summary = run_training(config)
-    #     print(f"summary:  {summary.keys()}")
-
-    #     # Save training summary
-    #     if summary:
-    #         print("Config keys:", vars(config).keys())
-    #         summary_path = OUTPUT_DIR / "results" / f"summary_{config.model}.json"
-    #         summary_path.parent.mkdir(parents=True, exist_ok=True)
-    #         with open(summary_path, "w") as f:
-    #             json.dump(summary, f, indent=2)
-
-    #     # Save effective config for evaluate.py
-    #     config_path = OUTPUT_DIR / "results" / f"config_{config.model}.yaml"
-    #     with open(config_path, "w") as f:
-    #         yaml.dump(vars(config), f)
-
-    # summary_path = OUTPUT_DIR / "results" / f"summary_{config.model}.json"
-    # summary_path.parent.mkdir(parents=True, exist_ok=True)
-    # with open(summary_path, "w") as f:
-    #     json.dump(summary, f, indent=4)
-
-    # print(f"Saved summary to: {summary_path}")
-    # print(f"Saved config to: {summary_path.parent / 'config.yaml'}")
-    # print(f"Best model: {summary['model_path']} (epoch {summary['best_epoch']})")
-
-    # time_spent = (time.time() - t0) / 60
-    # print(f"Elapsed time: {time_spent:.2f} minutes")
 
 
 if __name__ == "__main__":

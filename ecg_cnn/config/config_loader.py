@@ -120,6 +120,8 @@ def load_training_config(path: Path | str, strict: bool = True) -> TrainConfig |
 
     if strict:
         raw.pop("fold", None)  # <- Drop fold before validation
+        raw.pop("tag", None)  # <- Drop tag to avoid TrainConfig crash
+        raw.pop("config", None)  # <- Drop config path (for info only)
         try:
             cfg = TrainConfig(**raw)
         except TypeError as e:

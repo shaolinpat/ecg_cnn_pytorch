@@ -1,5 +1,11 @@
+import numpy as np
 import pytest
-from ecg_cnn.utils.validate import validate_hparams_config, validate_hparams_formatting
+from ecg_cnn.utils.validate import (
+    validate_hparams_config,
+    validate_hparams_formatting,
+    validate_y_true_pred,
+    validate_y_probs,
+)
 
 
 # ------------------------------------------------------------------------------
@@ -721,3 +727,95 @@ def test_validate_hparams_formatting_fname_metric_not_string():
             prefix="bad",
             fname_metric=3,
         )
+
+
+# ------------------------------------------------------------------------------
+# def validate_y_true_pred(y_true, y_pred):
+# ------------------------------------------------------------------------------
+
+
+def test_validate_y_true_pred_valid_lists():
+    validate_y_true_pred([0, 1, 2], [1, 0, 2])  # Should pass
+
+
+def test_validate_y_true_pred_valid_ndarrays():
+    y_true = np.array([0, 1, 2])
+    y_pred = np.array([2, 1, 0])
+    validate_y_true_pred(y_true, y_pred)  # Should pass
+
+
+def test_validate_y_true_pred_mismatched_length():
+    with pytest.raises(ValueError, match="same length"):
+        validate_y_true_pred([0, 1], [0, 1, 2])
+
+
+def test_validate_y_true_pred_invalid_type_y_true():
+    with pytest.raises(ValueError, match="y_true must be list or ndarray"):
+        validate_y_true_pred("not a list", [0, 1, 2])
+
+
+def test_validate_y_true_pred_invalid_type_y_pred():
+    with pytest.raises(ValueError, match="y_pred must be list or ndarray"):
+        validate_y_true_pred([0, 1, 2], "not a list")
+
+
+def test_validate_y_true_pred_non_integer_y_true():
+    with pytest.raises(ValueError, match="y_true must contain only integer"):
+        validate_y_true_pred([0, 1.5, 2], [0, 1, 2])
+
+
+def test_validate_y_true_pred_non_integer_y_pred():
+    with pytest.raises(ValueError, match="y_pred must contain only integer"):
+        validate_y_true_pred([0, 1, 2], [0, 1, 2.2])
+
+
+def test_validate_y_true_pred_bool_in_y_true():
+    with pytest.raises(ValueError, match="y_true must contain only integer"):
+        validate_y_true_pred([0, True, 2], [0, 1, 2])
+
+
+def test_validate_y_true_pred_bool_in_y_pred():
+    with pytest.raises(ValueError, match="y_pred must contain only integer"):
+        validate_y_true_pred([0, 1, 2], [True, 1, 2])
+
+
+# ------------------------------------------------------------------------------
+# def validate_y_probs(y_probs):
+# ------------------------------------------------------------------------------
+
+
+def test_validate_y_probs_valid_list():
+    validate_y_probs([0.0, 0.5, 1.0])  # Should pass
+
+
+def test_validate_y_probs_valid_ndarray():
+    validate_y_probs(np.array([0.25, 0.75]))  # Should pass
+
+
+def test_validate_y_probs_invalid_type():
+    with pytest.raises(ValueError, match="y_probs must be list or ndarray"):
+        validate_y_probs("not a list")
+
+
+def test_validate_y_probs_contains_int():
+    with pytest.raises(ValueError, match="must contain only float"):
+        validate_y_probs([0.0, 1, 0.5])  # int is not a float
+
+
+def test_validate_y_probs_contains_bool():
+    with pytest.raises(ValueError, match="must contain only float"):
+        validate_y_probs([0.0, True, 0.5])  # bool is subclass of int
+
+
+def test_validate_y_probs_out_of_range_low():
+    with pytest.raises(ValueError, match=r"probabilities in \[0.0, 1.0\]"):
+        validate_y_probs([-0.1, 0.5, 0.9])
+
+
+def test_validate_y_probs_out_of_range_high():
+    with pytest.raises(ValueError, match=r"probabilities in \[0.0, 1.0\]"):
+        validate_y_probs([0.0, 1.1, 0.5])
+
+
+def test_validate_y_probs_empty_list():
+    validate_y_probs([])  # Should pass — empty is still valid

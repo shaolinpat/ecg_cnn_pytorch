@@ -18,6 +18,7 @@ from ecg_cnn.data.data_utils import load_ptbxl_full, FIVE_SUPERCLASSES
 from ecg_cnn.models.model_utils import ECGConvNet
 from ecg_cnn.paths import (
     DEFAULT_TRAINING_CONFIG,
+    HISTORY_DIR,
     MODELS_DIR,
     OUTPUT_DIR,
     PROJECT_ROOT,
@@ -28,6 +29,7 @@ from ecg_cnn.utils.plot_utils import (
     save_pr_threshold_curve,
     save_confusion_matrix,
     save_plot_curves,
+    evaluate_and_plot,
 )
 
 SEED = 22
@@ -119,6 +121,27 @@ def main():
     y_pred = np.array(all_preds, dtype=int)
     y_probs = np.array(all_probs, dtype=np.float32)
 
+    train_accs = best.get("train_accs", [])
+    val_accs = best.get("val_accs", [])
+    train_loss = best.get("train_losses", [])
+    val_loss = best.get("val_losses", [])
+
+    print("Available keys in best summary:", best.keys())
+    print("train_losses:", best.get("train_losses"))
+    print("val_losses:", best.get("val_losses"))
+
+    # # Load full training history for loss/accuracy curves
+
+    # fold_idx = best["fold"] - 1
+    # hist_path = HISTORY_DIR / f"history_fold{fold_idx}.json"
+    # with open(hist_path, "r") as f:
+    #     hist = json.load(f)
+
+    # train_losses = hist.get("train_loss", [])
+    # val_losses = hist.get("val_loss", [])
+    # train_accs = hist.get("train_acc", [])
+    # val_accs = hist.get("val_acc", [])
+
     # Print classification report
     print("\nClassification Report:")
     print(
@@ -164,9 +187,9 @@ def main():
         fold=best_fold,
     )
 
-    # Fake Loss Curve Demo (optional)
-    train_loss = [1.5 - 0.1 * i for i in range(10)]
-    val_loss = [1.6 - 0.08 * i for i in range(10)]
+    # # Fake Loss Curve Demo (optional)
+    # train_loss = [1.5 - 0.1 * i for i in range(10)]
+    # val_loss = [1.6 - 0.08 * i for i in range(10)]
 
     save_plot_curves(
         x_vals=list(range(1, 11)),
@@ -183,6 +206,25 @@ def main():
         prefix="eval",
         fname_metric="loss",
         fold=best_fold,
+    )
+
+    evaluate_and_plot(
+        y_true=y_true,
+        y_pred=y_pred,
+        train_accs=train_accs,
+        val_accs=val_accs,
+        train_losses=train_loss,
+        val_losses=val_loss,
+        model=model,
+        lr=config.lr,
+        bs=config.batch_size,
+        wd=config.weight_decay,
+        prefix="eval=",
+        fname_metric="x",
+        out_folder=OUTPUT_DIR / "plots",
+        class_names=FIVE_SUPERCLASSES,
+        fold=best_fold,
+        epoch=best_epoch,
     )
 
     time_spent = (time.time() - t0) / 60

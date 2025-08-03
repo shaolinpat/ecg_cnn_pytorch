@@ -1,3 +1,10 @@
+import numpy as np
+
+
+INT_TYPES = (int, np.integer)
+FLOAT_TYPES = (float, np.floating)
+
+
 def validate_hparams_config(
     *,
     model: str,
@@ -126,3 +133,84 @@ def validate_hparams_formatting(
     if fold is not None:
         if not isinstance(fold, int) or fold < 1:
             raise ValueError(f"fold must be a positive integer. Got: {fold}")
+
+
+def validate_y_true_pred(y_true, y_pred):
+    """
+    Validate that y_true and y_pred are sequences (list or ndarray) of equal length,
+    and that all their elements are non-boolean integers.
+
+    Parameters
+    ----------
+    y_true : list[int] or np.ndarray
+        Ground-truth labels. Must be a list or NumPy array of integers (not bools).
+    y_pred : list[int] or np.ndarray
+        Predicted labels. Must be a list or NumPy array of integers (not bools).
+
+    Raises
+    ------
+    ValueError
+        If either y_true or y_pred is not a list or ndarray.
+    ValueError
+        If y_true and y_pred do not have the same length.
+    ValueError
+        If any element in y_true or y_pred is not a non-boolean integer.
+
+    Return
+    ------
+    None
+        This function performs validation only and returns nothing.
+    """
+    if not isinstance(y_true, (list, np.ndarray)):
+        raise ValueError(f"y_true must be list or ndarray, got {type(y_true)}")
+    if not isinstance(y_pred, (list, np.ndarray)):
+        raise ValueError(f"y_pred must be list or ndarray, got {type(y_pred)}")
+    if len(y_true) != len(y_pred):
+        raise ValueError(
+            f"y_true and y_pred must be the same length, got {len(y_true)} and {len(y_pred)}."
+        )
+    if not all(isinstance(i, INT_TYPES) and not isinstance(i, bool) for i in y_true):
+        raise ValueError("y_true must contain only integer values (not bools)")
+    if not all(isinstance(i, INT_TYPES) and not isinstance(i, bool) for i in y_pred):
+        raise ValueError("y_pred must contain only integer values (not bools)")
+
+
+def validate_y_probs(y_probs):
+    """
+    Validate that y_probs is a list or ndarray of floats within the range [0.0, 1.0].
+
+    Parameters
+    ----------
+    y_probs : list[float] or np.ndarray
+        A list or array of predicted probabilities. Each value must be a float
+        between 0.0 and 1.0 inclusive.
+
+    Raises
+    ------
+    ValueError
+        If y_probs is not a list or NumPy array.
+    ValueError
+        If any element is not a float.
+    ValueError
+        If any value is outside the range [0.0, 1.0].
+
+    Returns
+    -------
+    None
+        This function performs validation only and returns nothing.
+    """
+    if not isinstance(y_probs, (list, np.ndarray)):
+        raise ValueError(f"y_probs must be list or ndarray, got {type(y_probs)}")
+    # if not all(isinstance(p, FLOAT_TYPES) for p in y_probs):
+    #     raise ValueError("y_probs must contain only float values")
+
+    y_probs = np.asarray(y_probs)
+
+    if not np.issubdtype(y_probs.dtype, np.floating):
+        raise ValueError("y_probs must be float dtype")
+
+    # if not all(0.0 <= p <= 1.0 for p in y_probs):
+    #     raise ValueError("y_probs must contain probabilities in [0.0, 1.0]")
+
+    if np.any((y_probs < 0.0) | (y_probs > 1.0)):
+        raise ValueError("y_probs must contain probabilities in [0.0, 1.0]")

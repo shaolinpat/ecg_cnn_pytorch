@@ -1,0 +1,27 @@
+# Core dependencies
+torch==2.3.0       # or latest supported by Colab
+torchaudio
+torchvision
+numpy
+pandas
+scikit-learn
+matplotlib
+seaborn
+wfdb
+tqdm
+
+# Jupyter tools (Colab includes most already)
+jupyter
+ipykernel
+jupytext
+
+# Dev and testing tools
+pytest
+pytest-cov
+coverage
+
+# Your package in editable mode (disable for Colab)
+# -e .[dev]  # SKIPPED: Not allowed in Colab unless mounted from GDrive
+
+# Optional: if using YAML parsing and custom configs
+pyyaml
