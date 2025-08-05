@@ -268,8 +268,6 @@ def override_config_with_args(config: TrainConfig, args: Namespace) -> TrainConf
         raise ValueError(
             f"sampling_rate must be 100 or 500, got {config.sampling_rate}"
         )
-    if not isinstance(config.model, str) or not config.model.strip():
-        raise ValueError(f"model must be a non-empty string, got: {repr(config.model)}")
     if config.data_dir is not None and not isinstance(config.data_dir, (str, Path)):
         raise ValueError(
             f"data_dir must be a string, Path, or None, got {type(config.data_dir).__name__}"

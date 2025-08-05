@@ -635,15 +635,25 @@ def test_save_confusion_matrix_valid_fold_not_present():
 @pytest.mark.parametrize(
     "bad_y_true",
     [
-        "123",  # not a list
         [0, 1, "2"],  # not all ints
         [1.0, 2.0, 3.0],  # floats instead of ints
     ],
 )
 def test_save_confusion_matrix_invalid_y_true(bad_y_true):
-    with pytest.raises(ValueError, match="y_true must be a list of integers"):
+    with pytest.raises(ValueError, match="y_true must contain only integer values"):
         save_confusion_matrix(
             y_true=bad_y_true,
+            y_pred=[0, 1, 2],
+            class_names=["A", "B", "C"],
+            out_folder=tempfile.mkdtemp(),
+            **default_hparam_kwargs(),
+        )
+
+
+def test_save_confusion_matrix_y_true_not_list():
+    with pytest.raises(ValueError, match="y_true must be list or ndarray"):
+        save_confusion_matrix(
+            y_true="123",
             y_pred=[0, 1, 2],
             class_names=["A", "B", "C"],
             out_folder=tempfile.mkdtemp(),
@@ -654,16 +664,26 @@ def test_save_confusion_matrix_invalid_y_true(bad_y_true):
 @pytest.mark.parametrize(
     "bad_y_pred",
     [
-        None,
         [0, 1, None],
         [True, False, 1],
     ],
 )
 def test_save_confusion_matrix_invalid_y_pred(bad_y_pred):
-    with pytest.raises(ValueError, match="y_pred must be a list of integers"):
+    with pytest.raises(ValueError, match="y_pred must contain only integer values"):
         save_confusion_matrix(
             y_true=[0, 1, 2],
             y_pred=bad_y_pred,
+            class_names=["A", "B", "C"],
+            out_folder=tempfile.mkdtemp(),
+            **default_hparam_kwargs(),
+        )
+
+
+def test_save_confusion_matrix_y_pred_none():
+    with pytest.raises(ValueError, match="y_pred must be list or ndarray"):
+        save_confusion_matrix(
+            y_true=[0, 1, 2],
+            y_pred=None,
             class_names=["A", "B", "C"],
             out_folder=tempfile.mkdtemp(),
             **default_hparam_kwargs(),
@@ -704,9 +724,7 @@ def test_save_confusion_matrix_invalid_out_folder():
 
 
 def test_save_confusion_matrix_fold_too_small():
-    with pytest.raises(
-        ValueError, match="fold must be a positive integer if provided."
-    ):
+    with pytest.raises(ValueError, match="fold must be a positive integer."):
         save_confusion_matrix(
             y_true=[0, 1, 2],
             y_pred=[0, 1, 2],
@@ -724,9 +742,7 @@ def test_save_confusion_matrix_fold_too_small():
 
 
 def test_save_confusion_matrix_fold_not_int():
-    with pytest.raises(
-        ValueError, match="fold must be a positive integer if provided."
-    ):
+    with pytest.raises(ValueError, match="fold must be a positive integer."):
         save_confusion_matrix(
             y_true=[0, 1, 2],
             y_pred=[0, 1, 2],
@@ -741,6 +757,50 @@ def test_save_confusion_matrix_fold_not_int():
             fname_metric="some_metric",
             fold="2",
         )
+
+
+def test_confusion_matrix_class_names_too_short():
+    y_true = [0, 1, 2]  # max index = 2
+    y_pred = [0, 1, 2]
+    class_names = ["A", "B"]  # only indices 0 and 1 valid
+
+    with pytest.raises(ValueError, match="class_names must cover all class indices"):
+        save_confusion_matrix(
+            y_true=y_true,
+            y_pred=y_pred,
+            class_names=class_names,
+            out_folder="outputs/",
+            model="TestModel",
+            lr=0.001,
+            bs=64,
+            wd=0.0,
+            epoch=10,
+            prefix="test",
+            fname_metric="accuracy",
+        )
+
+
+def test_confusion_matrix_class_names_exact_match():
+    y_true = [0, 1, 2]
+    y_pred = [0, 1, 2]
+    class_names = ["A", "B", "G"]
+
+    try:
+        save_confusion_matrix(
+            y_true=y_true,
+            y_pred=y_pred,
+            class_names=class_names,
+            out_folder="outputs/",
+            model="TestModel",
+            lr=0.001,
+            bs=64,
+            wd=0.0,
+            epoch=10,
+            prefix="test",
+            fname_metric="accuracy",
+        )
+    except ValueError:
+        pytest.fail("Unexpected ValueError for valid class_names.")
 
 
 # ------------------------------------------------------------------------------
@@ -819,7 +879,7 @@ def test_save_pr_threshold_curve_y_true_contains_non_ints(bad_input, tmp_path):
     title = "Test PR Threshold Curve"
 
     with pytest.raises(
-        ValueError, match=r"y_true must contain only integers \(not bools\)"
+        ValueError, match=r"y_true must contain only integer values \(not bools\)"
     ):
         save_pr_threshold_curve(
             y_true=bad_input,
@@ -979,10 +1039,8 @@ def test_save_classification_report_success(tmp_path):
     )
 
     filename = format_hparams(**hparams)
-    out_path_txt = tmp_path / f"{filename}.txt"
     out_path_png = tmp_path / f"{filename}.png"
 
-    assert out_path_txt.exists(), "Missing .txt report"
     assert out_path_png.exists(), "Missing heatmap .png"
 
 
@@ -1010,7 +1068,7 @@ def test_save_classification_report_invalid_y_true(bad_y_true, tmp_path):
 # ------------------------------------------------------------------------------
 @pytest.mark.parametrize("bad_y_pred", [None, {"x": 1}, [True, False], 3.14])
 def test_save_classification_report_invalid_y_pred(bad_y_pred, tmp_path):
-    y_true = [0, 1, 0]
+    y_true = [0, 1]
     class_names = ["A", "B"]
     hparams = default_hparam_kwargs()
 
@@ -1165,6 +1223,7 @@ class_names = ["Normal", "Abnormal"]
 def test_evaluate_and_plot_success(tmp_path):
     y_true = [0, 1, 0]
     y_pred = [0, 1, 1]
+    y_probs = [0.3, 0.2, 0.3]
     hparams = default_hparam_kwargs()
 
     evaluate_and_plot(
@@ -1176,6 +1235,7 @@ def test_evaluate_and_plot_success(tmp_path):
         val_losses=dummy_losses,
         out_folder=tmp_path,
         class_names=class_names,
+        y_probs=y_probs,
         **hparams,
     )
 
@@ -1191,8 +1251,7 @@ def test_evaluate_and_plot_success(tmp_path):
         fname_metric="classification_report",
     )
 
-    # The report (txt + heatmap) is saved under reports/
-    assert (tmp_path / "reports" / f"{report_fname}.txt").exists()
+    # The report (heatmap) is saved under reports/
     assert (tmp_path / "reports" / f"{report_fname}.png").exists()
 
 
@@ -1203,7 +1262,6 @@ def test_evaluate_and_plot_success(tmp_path):
         (123, "y_true must be list or ndarray"),
         ([0, "a", 2], "y_true must contain only integer values"),
         ([True, False], "y_true must contain only integer values"),
-        ([0, 1, 2], "class_names length must cover all class indices"),
     ],
 )
 def test_evaluate_and_plot_invalid_y_true(bad_val, err_msg, tmp_path):
@@ -1212,6 +1270,8 @@ def test_evaluate_and_plot_invalid_y_true(bad_val, err_msg, tmp_path):
     # Make y_pred the same length as y_true *when y_true is a list* so we
     # don’t trip the length check before the intended validation.
     y_pred = [0, 1, 0]
+    y_probs = [0.2, 0.2, 0.5]
+
     if isinstance(bad_val, list):
         y_pred = y_pred[: len(bad_val)]
 
@@ -1225,6 +1285,7 @@ def test_evaluate_and_plot_invalid_y_true(bad_val, err_msg, tmp_path):
             val_losses=dummy_losses,
             out_folder=tmp_path,
             class_names=class_names,
+            y_probs=y_probs,
             **hparams,
         )
 
@@ -1242,6 +1303,7 @@ def test_evaluate_and_plot_invalid_y_true(bad_val, err_msg, tmp_path):
 def test_evaluate_and_plot_invalid_y_pred(bad_val, err_msg, tmp_path):
     hparams = default_hparam_kwargs()
     y_true = [0, 1, 0]
+    y_probs = [0.0, 0.1, 0.3]
 
     # Only align lengths when we're *not* testing for the mismatch error
     if (
@@ -1261,6 +1323,7 @@ def test_evaluate_and_plot_invalid_y_pred(bad_val, err_msg, tmp_path):
             val_losses=dummy_losses,
             out_folder=tmp_path,
             class_names=class_names,
+            y_probs=y_probs,
             **hparams,
         )
 
@@ -1268,10 +1331,10 @@ def test_evaluate_and_plot_invalid_y_pred(bad_val, err_msg, tmp_path):
 @pytest.mark.parametrize(
     "bad_val, err_msg",
     [
-        (None, "class_names must be a list"),
-        (123, "class_names must be a list"),
+        (None, "class_names must be a non-empty list of string"),
+        (123, "class_names must be a non-empty list of string"),
         ([], "class_names cannot be empty"),
-        ([0, 1], "class_names must be a list"),
+        ([0, 1], "class_names must be a non-empty list of string"),
     ],
 )
 def test_evaluate_and_plot_invalid_class_names(bad_val, err_msg, tmp_path):
@@ -1286,6 +1349,7 @@ def test_evaluate_and_plot_invalid_class_names(bad_val, err_msg, tmp_path):
             val_losses=dummy_losses,
             out_folder=tmp_path,
             class_names=bad_val,
+            y_probs=[0.2, 0.3, 0.2],
             **hparams,
         )
 
@@ -1303,6 +1367,7 @@ def test_evaluate_and_plot_invalid_out_folder(bad_val):
             val_losses=dummy_losses,
             out_folder=bad_val,
             class_names=class_names,
+            y_probs=[0.2],
             **hparams,
         )
 
@@ -1323,6 +1388,7 @@ def test_evaluate_and_plot_mismatched_metrics(tmp_path):
             val_losses=dummy_losses,
             out_folder=tmp_path,
             class_names=class_names,
+            y_probs=[0.3],
             **hparams,
         )
 
@@ -1336,16 +1402,17 @@ def test_evaluate_and_plot_fold_is_none(tmp_path):
         val_accs=dummy_accs,
         train_losses=dummy_losses,
         val_losses=dummy_losses,
-        out_folder=tmp_path,
-        class_names=class_names,
         model="SomeModel",
         lr=0.001,
         bs=64,
         wd=0.0,
-        epoch=10,
         prefix="test",
         fname_metric="some_metric",
+        out_folder=tmp_path,
+        class_names=class_names,
+        y_probs=[0.33, 0.22, 0.55],
         fold=None,
+        epoch=10,
     )
 
 
@@ -1360,16 +1427,17 @@ def test_evaluate_and_plot_fold_not_int(tmp_path):
             val_accs=dummy_accs,
             train_losses=dummy_losses,
             val_losses=dummy_losses,
-            out_folder=tmp_path,
-            class_names=class_names,
             model="SomeModel",
             lr=0.001,
             bs=64,
             wd=0.0,
-            epoch=10,
             prefix="test",
             fname_metric="some_metric",
+            out_folder=tmp_path,
+            class_names=class_names,
+            y_probs=[0.0],
             fold="0",
+            epoch=10,
         )
 
 
@@ -1384,16 +1452,17 @@ def test_evaluate_and_plot_fold_not_int_but_float(tmp_path):
             val_accs=dummy_accs,
             train_losses=dummy_losses,
             val_losses=dummy_losses,
-            out_folder=tmp_path,
-            class_names=class_names,
             model="SomeModel",
             lr=0.001,
             bs=64,
             wd=0.0,
-            epoch=10,
             prefix="test",
             fname_metric="some_metric",
+            out_folder=tmp_path,
+            class_names=class_names,
+            y_probs=[0.2],
             fold=6.0,
+            epoch=10,
         )
 
 
@@ -1408,14 +1477,153 @@ def test_evaluate_and_plot_fold_too_small(tmp_path):
             val_accs=dummy_accs,
             train_losses=dummy_losses,
             val_losses=dummy_losses,
-            out_folder=tmp_path,
-            class_names=class_names,
             model="SomeModel",
             lr=0.001,
             bs=64,
             wd=0.0,
-            epoch=10,
             prefix="test",
             fname_metric="some_metric",
+            out_folder=tmp_path,
+            class_names=class_names,
+            y_probs=[0.2],
             fold=0,
+            epoch=10,
         )
+
+
+def test_evaluate_and_plot_class_names_too_short(tmp_path):
+    y_true = [0, 1, 2]  # max index = 2
+    y_pred = [0, 1, 2]
+    class_names = ["A", "B"]  # only indices 0 and 1 valid
+
+    with pytest.raises(ValueError, match="class_names must cover all class indices"):
+        evaluate_and_plot(
+            y_true=y_true,
+            y_pred=y_pred,
+            train_accs=dummy_accs,
+            val_accs=dummy_accs,
+            train_losses=dummy_losses,
+            val_losses=dummy_losses,
+            model="SomeModel",
+            lr=0.001,
+            bs=64,
+            wd=0.0,
+            prefix="test",
+            fname_metric="some_metric",
+            out_folder=tmp_path,
+            class_names=class_names,
+            y_probs=[0.2, 0.0, 0.3],
+            fold=1,
+            epoch=10,
+        )
+
+
+def test_evaluate_and_plot_class_names_exact_match(tmp_path):
+    y_true = [0, 1, 2]  # max index = 2
+    y_pred = [0, 1, 2]
+    class_names = ["A", "B", "G"]
+
+    try:
+        evaluate_and_plot(
+            y_true=y_true,
+            y_pred=y_pred,
+            train_accs=dummy_accs,
+            val_accs=dummy_accs,
+            train_losses=dummy_losses,
+            val_losses=dummy_losses,
+            model="SomeModel",
+            lr=0.001,
+            bs=64,
+            wd=0.0,
+            prefix="test",
+            fname_metric="some_metric",
+            out_folder=tmp_path,
+            class_names=class_names,
+            y_probs=[0.2, 0.0, 0.3],
+            fold=1,
+            epoch=10,
+        )
+    except ValueError:
+        pytest.fail("Unexpected ValueError for valid class_names.")
+
+
+def test_evaluate_and_plot_skips_invalid_y_probs_shape(tmp_path, capsys):
+    y_true = [0, 1, 0, 2]
+    y_pred = [0, 1, 1, 2]
+    y_probs = np.array([0.8, 0.6, 0.7, 0.2])  # 1D array — invalid shape for OvR
+
+    out_folder = tmp_path / "plots"
+    out_folder.mkdir()
+
+    model = "TestModel"
+    class_names = ["A", "B", "C"]
+
+    evaluate_and_plot(
+        y_true=y_true,
+        y_pred=y_pred,
+        train_accs=dummy_accs,
+        val_accs=dummy_accs,
+        train_losses=dummy_losses,
+        val_losses=dummy_losses,
+        y_probs=y_probs,
+        class_names=class_names,
+        out_folder=out_folder,
+        model=model,
+        lr=0.001,
+        bs=32,
+        wd=0.0,
+        epoch=5,
+        fname_metric="accuracy",
+        prefix="test",
+    )
+
+    captured = capsys.readouterr()
+    assert "Skipping PR curve" in captured.out
+
+
+def test_evaluate_and_plot_ovr_pr_curve(tmp_path):
+    y_true = [0, 1, 2, 1]
+    y_pred = [0, 2, 2, 1]
+    y_probs = np.array(
+        [
+            [0.9, 0.05, 0.05],
+            [0.1, 0.7, 0.2],
+            [0.1, 0.1, 0.8],
+            [0.2, 0.6, 0.2],
+        ],
+        dtype=float,
+    )
+    class_names = ["NORM", "MI", "STTC"]
+
+    # out_dir = tmp_path / "plots"
+    # out_dir.mkdir()
+    out_dir = tmp_path
+    (out_dir / "plots").mkdir()
+
+    evaluate_and_plot(
+        y_true=y_true,
+        y_pred=y_pred,
+        train_accs=dummy_accs,
+        val_accs=dummy_accs,
+        train_losses=dummy_losses,
+        val_losses=dummy_losses,
+        y_probs=y_probs,
+        class_names=class_names,
+        out_folder=out_dir,
+        model="TestModel",
+        lr=0.001,
+        bs=64,
+        wd=0.0,
+        epoch=5,
+        prefix="unit_test",
+        fname_metric="pr_threshold",
+    )
+
+    # PR curve plots are saved in out_dir/plots/
+    for label in class_names:
+        found = list(
+            (out_dir / "plots").glob(
+                f"unit_test_ovr_{label.lower()}_pr_threshold_*.png"
+            )
+        )
+        assert found, f"No plot saved for class {label}"

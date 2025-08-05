@@ -819,3 +819,21 @@ def test_validate_y_probs_out_of_range_high():
 
 def test_validate_y_probs_empty_list():
     validate_y_probs([])  # Should pass — empty is still valid
+
+
+def test_validate_y_probs_ndarray_with_integers():
+    arr = np.array([0, 1, 1], dtype=int)
+    with pytest.raises(ValueError, match="must contain only float"):
+        validate_y_probs(arr)
+
+
+def test_validate_y_probs_ndarray_with_booleans():
+    arr = np.array([True, False, True], dtype=bool)
+    with pytest.raises(ValueError, match="must contain only float"):
+        validate_y_probs(arr)
+
+
+def test_validate_y_probs_ndarray_too_many_dimensions():
+    arr = np.ones((2, 2, 2), dtype=float)
+    with pytest.raises(ValueError, match="must be 1D or 2D"):
+        validate_y_probs(arr)

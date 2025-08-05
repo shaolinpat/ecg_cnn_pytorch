@@ -34,6 +34,7 @@ outputs/history
 outputs/plots/
 outputs/results/
 outputs/predictions/
+outputs/
 
 # Large raw data (excluded because reproducible elsewhere)
 data/larger_sample/

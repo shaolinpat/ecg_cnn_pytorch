@@ -175,6 +175,200 @@ def validate_y_true_pred(y_true, y_pred):
         raise ValueError("y_pred must contain only integer values (not bools)")
 
 
+# def validate_y_probs(y_probs):
+#     """
+#     Validate that y_probs is a list or ndarray of floats within the range [0.0, 1.0].
+
+#     Parameters
+#     ----------
+#     y_probs : list[float] or np.ndarray
+#         A list or array of predicted probabilities. Each value must be a float
+#         between 0.0 and 1.0 inclusive.
+
+#     Raises
+#     ------
+#     ValueError
+#         If y_probs is not a list or NumPy array.
+#     ValueError
+#         If any element is not a float.
+#     ValueError
+#         If any value is outside the range [0.0, 1.0].
+
+#     Returns
+#     -------
+#     None
+#         This function performs validation only and returns nothing.
+#     """
+#     if not isinstance(y_probs, (list, np.ndarray)):
+#         raise ValueError(f"y_probs must be list or ndarray, got {type(y_probs)}")
+
+#     y_probs = np.asarray(y_probs)
+
+#     if not all(isinstance(p, float) for p in y_probs):
+#         raise ValueError("y_probs must contain only float values")
+
+#     # y_probs = np.asarray(y_probs)
+
+#     if np.any((y_probs < 0.0) | (y_probs > 1.0)):
+#         raise ValueError("y_probs must contain probabilities in [0.0, 1.0]")
+
+
+# def validate_y_probs(y_probs):
+#     """
+#     Validate that y_probs is a list or ndarray of floats within the range [0.0, 1.0].
+
+#     Parameters
+#     ----------
+#     y_probs : list[float] or np.ndarray
+#         A list or array of predicted probabilities. Each value must be a float
+#         (Python float or NumPy float) between 0.0 and 1.0 inclusive.
+
+#     Raises
+#     ------
+#     ValueError
+#         If y_probs is not a list or NumPy array.
+#     ValueError
+#         If any element is not a float (e.g., bools or ints).
+#     ValueError
+#         If any value is outside the range [0.0, 1.0].
+
+#     Returns
+#     -------
+#     None
+#         This function performs validation only and returns nothing.
+#     """
+#     if not isinstance(y_probs, (list, np.ndarray)):
+#         raise ValueError(f"y_probs must be list or ndarray, got {type(y_probs)}")
+
+#     y_probs = np.asarray(y_probs).flatten()
+
+#     # Reject anything that is not exactly float or np.floating subclass, and not bool
+#     for p in y_probs:
+#         if isinstance(p, (bool, int)) or not np.issubdtype(type(p), np.floating):
+#             raise ValueError("y_probs must contain only float values")
+
+#     if np.any((y_probs < 0.0) | (y_probs > 1.0)):
+#         raise ValueError("y_probs must contain probabilities in [0.0, 1.0]")
+
+
+# def validate_y_probs(y_probs):
+#     """
+#     Validate that y_probs is a list or ndarray of floats within the range [0.0, 1.0].
+
+#     Parameters
+#     ----------
+#     y_probs : list[float] or np.ndarray
+#         A list or array of predicted probabilities. Each value must be a float
+#         (Python float or np.floating) between 0.0 and 1.0 inclusive.
+
+#     Raises
+#     ------
+#     ValueError
+#         If y_probs is not a list or NumPy array.
+#     ValueError
+#         If any element is not a float (e.g., int or bool).
+#     ValueError
+#         If any value is outside the range [0.0, 1.0].
+
+#     Returns
+#     -------
+#     None
+#     """
+#     if not isinstance(y_probs, (list, np.ndarray)):
+#         raise ValueError(f"y_probs must be list or ndarray, got {type(y_probs)}")
+
+#     # y_probs = np.asarray(y_probs).flatten()
+
+#     # Don't convert to np.array until AFTER type check
+#     for p in y_probs:
+#         if not isinstance(p, float) and not isinstance(p, np.floating):
+#             raise ValueError("y_probs must contain only float values")
+
+#     y_probs = np.asarray(y_probs).flatten()
+
+#     if np.any((y_probs < 0.0) | (y_probs > 1.0)):
+#         raise ValueError("y_probs must contain probabilities in [0.0, 1.0]")
+
+# def validate_y_probs(y_probs):
+#     """
+#     Validate that y_probs is a list or ndarray of floats within the range [0.0, 1.0].
+
+#     Parameters
+#     ----------
+#     y_probs : list[float] or np.ndarray
+#         A list or array of predicted probabilities. Each value must be a float
+#         (Python float or np.floating) between 0.0 and 1.0 inclusive.
+
+#     Raises
+#     ------
+#     ValueError
+#         If y_probs is not a list or NumPy array.
+#     ValueError
+#         If any element is not a float (e.g., int or bool).
+#     ValueError
+#         If any value is outside the range [0.0, 1.0].
+
+#     Returns
+#     -------
+#     None
+#     """
+#     if not isinstance(y_probs, (list, np.ndarray)):
+#         raise ValueError(f"y_probs must be list or ndarray, got {type(y_probs)}")
+
+#     # y_probs = np.asarray(y_probs).flatten()
+
+#     # Don't convert to np.array until AFTER type check
+#     for p in y_probs:
+#         if not isinstance(p, float) and not isinstance(p, np.floating):
+#             raise ValueError("y_probs must contain only float values")
+
+#     y_probs = np.asarray(y_probs).flatten()
+
+#     if np.any((y_probs < 0.0) | (y_probs > 1.0)):
+#         raise ValueError("y_probs must contain probabilities in [0.0, 1.0]")
+
+
+# def validate_y_probs(y_probs):
+#     """
+#     Validate that y_probs is a list or ndarray of floats within the range [0.0, 1.0].
+
+#     Parameters
+#     ----------
+#     y_probs : list[float] or np.ndarray
+#         A list or array of predicted probabilities. Each value must be a float
+#         between 0.0 and 1.0 inclusive.
+
+#     Raises
+#     ------
+#     ValueError
+#         If y_probs is not a list or NumPy array.
+#     ValueError
+#         If any element is not a float.
+#     ValueError
+#         If any value is outside the range [0.0, 1.0].
+
+#     Returns
+#     -------
+#     None
+#         This function performs validation only and returns nothing.
+#     """
+#     if not isinstance(y_probs, (list, np.ndarray)):
+#         raise ValueError(f"y_probs must be list or ndarray, got {type(y_probs)}")
+
+#     if isinstance(y_probs, list):
+#         if not all(isinstance(p, float) for p in y_probs):
+#             raise ValueError("y_probs must contain only float values")
+#         arr = np.asarray(y_probs, dtype=float)
+#     else:  # ndarray
+#         arr = np.asarray(y_probs)
+#         if not np.issubdtype(arr.dtype, np.floating):
+#             raise ValueError("y_probs must contain only float values")
+
+
+#     if np.any((arr < 0.0) | (arr > 1.0)):
+#         raise ValueError("y_probs must contain probabilities in [0.0, 1.0]")
+
+
 def validate_y_probs(y_probs):
     """
     Validate that y_probs is a list or ndarray of floats within the range [0.0, 1.0].
@@ -201,16 +395,18 @@ def validate_y_probs(y_probs):
     """
     if not isinstance(y_probs, (list, np.ndarray)):
         raise ValueError(f"y_probs must be list or ndarray, got {type(y_probs)}")
-    # if not all(isinstance(p, FLOAT_TYPES) for p in y_probs):
-    #     raise ValueError("y_probs must contain only float values")
 
-    y_probs = np.asarray(y_probs)
+    if isinstance(y_probs, list):
+        if not all(isinstance(p, float) for p in y_probs):
+            raise ValueError("y_probs must contain only float values")
+        arr = np.asarray(y_probs, dtype=float)
+    else:  # ndarray
+        arr = np.asarray(y_probs)
+        if not np.issubdtype(arr.dtype, np.floating):
+            raise ValueError("y_probs must contain only float values")
 
-    if not np.issubdtype(y_probs.dtype, np.floating):
-        raise ValueError("y_probs must be float dtype")
+    if arr.ndim > 2:
+        raise ValueError("y_probs must be 1D or 2D")
 
-    # if not all(0.0 <= p <= 1.0 for p in y_probs):
-    #     raise ValueError("y_probs must contain probabilities in [0.0, 1.0]")
-
-    if np.any((y_probs < 0.0) | (y_probs > 1.0)):
+    if np.any((arr < 0.0) | (arr > 1.0)):
         raise ValueError("y_probs must contain probabilities in [0.0, 1.0]")
