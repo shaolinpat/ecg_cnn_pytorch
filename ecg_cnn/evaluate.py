@@ -16,7 +16,7 @@ from torch.utils.data import TensorDataset, DataLoader
 
 from ecg_cnn.config.config_loader import load_training_config, TrainConfig
 from ecg_cnn.data.data_utils import load_ptbxl_full, FIVE_SUPERCLASSES
-from ecg_cnn.models.model_utils import ECGConvNet
+from ecg_cnn.models import MODEL_CLASSES
 from ecg_cnn.paths import (
     HISTORY_DIR,
     MODELS_DIR,
@@ -109,7 +109,8 @@ def main():
     print(f"Loading model: {best_model_path.name}")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = ECGConvNet(num_classes=len(FIVE_SUPERCLASSES)).to(device)
+    model_cls = MODEL_CLASSES[config.model]
+    model = model_cls(num_classes=len(FIVE_SUPERCLASSES)).to(device)
     model.load_state_dict(torch.load(best_model_path, map_location=device))
     model.eval()
 

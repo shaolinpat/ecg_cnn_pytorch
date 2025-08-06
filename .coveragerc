@@ -1,0 +1,3 @@
+[run]
+omit =
+    ecg_cnn/utils/find_labels.py

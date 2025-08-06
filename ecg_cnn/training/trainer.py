@@ -11,13 +11,14 @@ from torch.utils.data import DataLoader, TensorDataset
 from typing import Optional
 
 from ecg_cnn.config.config_loader import TrainConfig
-from ecg_cnn.models import model_utils
-from ecg_cnn.paths import HISTORY_DIR, MODELS_DIR, PTBXL_DATA_DIR
 from ecg_cnn.data.data_utils import (
     FIVE_SUPERCLASSES,
     load_ptbxl_sample,
     load_ptbxl_full,
 )
+from ecg_cnn.models import model_utils
+from ecg_cnn.paths import HISTORY_DIR, MODELS_DIR, PTBXL_DATA_DIR
+from ecg_cnn.training.training_utils import compute_class_weights
 
 
 def train_one_epoch(model, dataloader, optimizer, criterion, device):
@@ -277,7 +278,11 @@ def run_training(
     optimizer = torch.optim.Adam(
         model.parameters(), lr=config.lr, weight_decay=config.weight_decay
     )
-    criterion = nn.CrossEntropyLoss()
+    # criterion = nn.CrossEntropyLoss()
+    y_train_np = train_dataset.tensors[1].numpy()
+    num_classes = len(np.unique(y_train_np))
+    class_weights = compute_class_weights(y_train_np, num_classes)
+    criterion = nn.CrossEntropyLoss(weight=class_weights)
 
     best_loss = float("inf")
     best_epoch = -1

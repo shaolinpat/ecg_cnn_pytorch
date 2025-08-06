@@ -2,7 +2,14 @@ import numpy as np
 import pytest
 import random
 import torch
-from ecg_cnn.models.model_utils import ECGConvNet
+from ecg_cnn.models.model_utils import (
+    ECGConvNet,
+    ECGResNet,
+    ECGInceptionNet,
+    InceptionBlock1D,
+    ResidualBlock1D,
+    count_parameters,
+)
 
 
 SEED = 22
@@ -11,6 +18,9 @@ random.seed(SEED)
 np.random.seed(SEED)
 
 
+# ------------------------------------------------------------------------------
+# ECGConvNet
+# ------------------------------------------------------------------------------
 def test_ecgconvnet_num_parameters():
     model = ECGConvNet(num_classes=4)
     num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -85,3 +95,95 @@ def test_get_flattened_size_seq_len_too_low():
     model = ECGConvNet(num_classes=5)
     with pytest.raises(ValueError, match=f"seq_len must be an int >= 8"):
         model._get_flattened_size(in_channels=12, seq_len=7)
+
+
+def test_ecgconvnet_repr():
+    model = ECGConvNet(num_classes=3)
+    r = repr(model)
+    assert "ECGConvNet" in r
+    assert "num_classes=3" in r
+
+
+# ------------------------------------------------------------------------------
+# ECGResNet
+# ------------------------------------------------------------------------------
+
+
+def test_ecgresnet_forward_shape():
+    model = ECGResNet(num_classes=6)
+    dummy_input = torch.randn(2, 12, 1000)
+    output = model(dummy_input)
+    assert output.shape == (2, 6)
+
+
+def test_ecgresnet_repr():
+    model = ECGResNet(num_classes=3)
+    r = repr(model)
+    assert "ECGResNet" in r
+    assert "num_classes=3" in r
+
+
+# ------------------------------------------------------------------------------
+# ECGInceptionNet
+# ------------------------------------------------------------------------------
+
+
+def test_ecginceptionnet_forward_shape():
+    model = ECGInceptionNet(num_classes=4)
+    dummy_input = torch.randn(3, 12, 1000)
+    output = model(dummy_input)
+    assert output.shape == (3, 4)
+
+
+def test_ecginceptionnet_repr():
+    model = ECGInceptionNet(num_classes=3)
+    r = repr(model)
+    assert "ECGInceptionNet" in r
+    assert "num_classes=3" in r
+
+
+# ------------------------------------------------------------------------------
+# InceptionBlock1D
+
+# ------------------------------------------------------------------------------
+
+
+def test_inceptionblock1d_repr():
+    model = InceptionBlock1D(in_channels=22, out_channels=11)
+    r = repr(model)
+    assert "InceptionBlock1D" in r
+    assert "bottleneck_channels=32" in r
+
+
+# ------------------------------------------------------------------------------
+# ResidualBlock1D
+# ------------------------------------------------------------------------------
+
+
+def test_residualblock1d_repr():
+    model = ResidualBlock1D(in_channels=22, out_channels=11, kernel_size=4)
+    r = repr(model)
+    assert "ResidualBlock1D" in r
+    assert "kernel_size=4" in r
+
+
+from ecg_cnn.models.model_utils import count_parameters
+
+
+def test_count_parameters_matches_sum():
+    model = ECGConvNet(num_classes=5)
+    counted = count_parameters(model)
+    manual = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    assert counted == manual
+
+
+# ------------------------------------------------------------------------------
+# count_parameters
+# ------------------------------------------------------------------------------
+
+
+def test_count_parameters_matches_sum():
+    model = ECGConvNet(num_classes=5)
+    counted = count_parameters(model)
+    manual = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    assert counted == manual
