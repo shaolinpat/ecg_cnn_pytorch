@@ -4,28 +4,16 @@ import numpy as np
 import pandas as pd
 import pytest
 import torch
+import subprocess
+import sys
 from pathlib import Path
 from torch.utils.data import TensorDataset, DataLoader
 from unittest import mock
 
 import ecg_cnn.evaluate as evaluate
 
-# required_fields = {
-#     "lr": 0.001,
-#     "batch_size": 64,
-#     "weight_decay": 0.0,
-#     "n_epochs": 10,
-#     "save_best": True,
-#     "sample_only": False,
-#     "subsample_frac": 1.0,
-#     "sampling_rate": 100,
-#     "model": "ECGConvNet",
-#     "tag": "dummy",
-#     "config": "config_dummy.yaml",
-# }
 
-
-@mock.patch("torch.load")  # ✅ Mock torch.load to avoid real file access
+@mock.patch("torch.load")  # Mock torch.load to avoid real file access
 @mock.patch("ecg_cnn.evaluate.load_ptbxl_full")
 @mock.patch("ecg_cnn.evaluate.MODEL_CLASSES")
 @mock.patch("ecg_cnn.evaluate.load_training_config")
@@ -37,9 +25,9 @@ def test_main_runs(
     mock_loader,
     mock_models,
     mock_load_data,
-    mock_torch_load,  # ✅ receives torch.load patch
+    mock_torch_load,  # receives torch.load patch
 ):
-    # ✅ Simulate glob finding the dummy config file
+    # Simulate glob finding the dummy config file
     with mock.patch.object(Path, "glob") as mock_glob:
         mock_glob.return_value = [evaluate.RESULTS_DIR / "config_dummy.yaml"]
 
@@ -63,7 +51,7 @@ def test_main_runs(
             pd.DataFrame({"dummy": range(10)}),  # meta
         )
 
-        # ✅ Raw config dictionary returned from YAML
+        # Raw config dictionary returned from YAML
         mock_loader.return_value = {
             "model": "ECGConvNet",
             "batch_size": 32,
@@ -76,7 +64,7 @@ def test_main_runs(
             "config": "config_dummy.yaml",
         }
 
-        # ✅ Simulate parsed TrainConfig
+        # Simulate parsed TrainConfig
         mock_config.return_value.model = "ECGConvNet"
         mock_config.return_value.batch_size = 32
         mock_config.return_value.lr = 0.001
@@ -85,7 +73,7 @@ def test_main_runs(
         mock_config.return_value.sampling_rate = 500
         mock_config.return_value.tag = "dummy"
 
-        # ✅ Fake model that returns logits with forced class distribution
+        # Fake model that returns logits with forced class distribution
         def fake_forward(x):
             num_classes = 5
             batch_size = x.shape[0]
@@ -99,12 +87,12 @@ def test_main_runs(
         mock_model_instance.to.return_value = mock_model_instance
         mock_model_instance.eval.return_value = mock_model_instance
 
-        # ✅ Patch ECGConvNet to return fake model
+        # Patch ECGConvNet to return fake model
         mock_models.__getitem__.return_value = mock.MagicMock(
             return_value=mock_model_instance
         )
 
-        # ✅ Dummy summary with required fields (including model_path)
+        # Dummy summary with required fields (including model_path)
         dummy_summary = {
             "fold": 0,
             "loss": 0.123,
@@ -116,7 +104,7 @@ def test_main_runs(
             "val_loss": [],
         }
 
-        # ✅ Simulate opening and reading summary JSON file
+        # Simulate opening and reading summary JSON file
         mock_open = mock.mock_open(read_data=json.dumps([dummy_summary]))
 
         with (
@@ -125,7 +113,7 @@ def test_main_runs(
         ):
             evaluate.main(fold_override=0)
 
-    # ✅ Assert expected behavior
+    # Assert expected behavior
     mock_eval_plot.assert_called_once()
     mock_torch_load.assert_called_once()
 
@@ -423,10 +411,6 @@ def test_main_loads_history_successfully(
         mock.patch.object(builtins, "print"),
     ):
         evaluate.main()
-
-
-import subprocess
-import sys
 
 
 def test_entry_point_runs(monkeypatch, tmp_path):

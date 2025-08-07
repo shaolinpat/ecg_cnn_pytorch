@@ -241,14 +241,14 @@ def run_training(
     # Fold-based split (optional)
     # --------------------------------------
     if fold_idx is not None:
-        if config.n_folds < 2:
-            raise ValueError("`n_folds` must be >= 2 if `fold_idx` is provided.")
+        # if config.n_folds < 2:
+        #     raise ValueError("`n_folds` must be >= 2 if `fold_idx` is provided.")
 
         skf = StratifiedKFold(n_splits=config.n_folds, shuffle=True, random_state=SEED)
         splits = list(skf.split(X_tensor, y_tensor))
 
-        if not (0 <= fold_idx < config.n_folds):
-            raise ValueError(f"Fold index out of range: {fold_idx}")
+        # if not (0 <= fold_idx < config.n_folds):
+        #     raise ValueError(f"Fold index out of range: {fold_idx}")
 
         train_idx, val_idx = splits[fold_idx]
         train_dataset = TensorDataset(X_tensor[train_idx], y_tensor[train_idx])
@@ -279,7 +279,17 @@ def run_training(
         model.parameters(), lr=config.lr, weight_decay=config.weight_decay
     )
     # criterion = nn.CrossEntropyLoss()
-    y_train_np = train_dataset.tensors[1].numpy()
+    # y_train_np = train_dataset.tensors[1].numpy()
+    # num_classes = len(np.unique(y_train_np))
+    # class_weights = compute_class_weights(y_train_np, num_classes)
+    # criterion = nn.CrossEntropyLoss(weight=class_weights)
+
+    # criterion = nn.CrossEntropyLoss()
+    if fold_idx is not None:
+        y_src = y_tensor[train_idx]
+    else:
+        y_src = y_tensor
+    y_train_np = y_src.numpy()
     num_classes = len(np.unique(y_train_np))
     class_weights = compute_class_weights(y_train_np, num_classes)
     criterion = nn.CrossEntropyLoss(weight=class_weights)
@@ -357,10 +367,6 @@ def run_training(
     return summary
 
 
-import numpy as np
-import torch
-
-
 def compute_class_weights(y: np.ndarray, num_classes: int) -> torch.Tensor:
     """
     Compute inverse frequency-based class weights for use with nn.CrossEntropyLoss.
@@ -395,7 +401,9 @@ def compute_class_weights(y: np.ndarray, num_classes: int) -> torch.Tensor:
 
     counts = np.bincount(y, minlength=num_classes)
     total = counts.sum()
-    weights = total / (num_classes * counts)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        weights = total / (num_classes * counts)
+
     return torch.tensor(weights, dtype=torch.float32)
 
 
