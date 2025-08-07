@@ -114,7 +114,7 @@ def main():
     for i, config in enumerate(param_grid):
         print(f"\n===== Starting training run {i+1}/{len(param_grid)} =====")
 
-        tag = f"{config.model}_lr{config.lr}_bs{config.batch_size}_wd{config.weight_decay}".replace(
+        tag = f"{config.model}_lr{config.lr:.4g}_bs{config.batch_size}_wd{config.weight_decay:.4g}".replace(
             ".", ""
         )
         config.tag = tag
