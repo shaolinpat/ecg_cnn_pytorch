@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 
+import argparse
 import json
 import time
-from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -10,6 +10,7 @@ import pandas as pd
 import seaborn as sns
 import torch
 import torch.nn as nn
+from pathlib import Path
 from sklearn.metrics import classification_report
 from sklearn.preprocessing import LabelEncoder
 from torch.utils.data import TensorDataset, DataLoader
@@ -38,13 +39,13 @@ torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
 
-def main():
+def main(fold_override=None):
     t0 = time.time()
 
     # Dynamically find the latest saved config YAML
     configs = sorted((RESULTS_DIR).glob("config_*.yaml"), reverse=True)
     if not configs:
-        raise FileNotFoundError("No config_*.yaml found in outputs/results/")
+        raise FileNotFoundError(f"No config_*.yaml found in {RESULTS_DIR}")
     config_path = configs[0]
     print(f"Loading config from: {config_path}")
 
@@ -55,12 +56,19 @@ def main():
 
     # Separate known and extra fields
     extra = {}
+    # for key in ("fold", "tag", "config"):
+    #     extra[key] = raw.pop(key, None)
+
     for key in ("fold", "tag", "config"):
-        extra[key] = raw.pop(key, None)
+        if key == "fold" and fold_override is not None:
+            extra[key] = fold_override  # manual CLI override
+        else:
+            extra[key] = raw.pop(key, None)
 
     try:
         config = TrainConfig(**raw)
     except TypeError as e:
+        print(">>> CAUGHT TYPEERROR:", e)
         raise ValueError(f"Invalid config structure or missing fields: {e}")
 
     for key, val in extra.items():
@@ -98,9 +106,21 @@ def main():
     with open(summary_path, "r") as f:
         summaries = json.load(f)
 
-    best = min(summaries, key=lambda d: d["loss"])
+    # best = min(summaries, key=lambda d: d["loss"])
+
+    if extra["fold"] is not None:
+        matching = [s for s in summaries if s.get("fold") == extra["fold"]]
+        if not matching:
+            raise ValueError(f"No summary entry found for fold {extra['fold']}")
+        best = min(matching, key=lambda d: d["loss"])
+    else:
+        best = min(summaries, key=lambda d: d["loss"])
+
     best_model_path = Path(best["model_path"])
     best_fold = best.get("fold")
+    if fold_override is not None:
+        best_fold = fold_override
+
     best_epoch = best.get("best_epoch")
 
     print(
@@ -273,4 +293,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--fold", type=int, default=None)
+    args = parser.parse_args()
+    main(fold_override=args.fold)

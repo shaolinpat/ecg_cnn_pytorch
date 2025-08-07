@@ -1,5 +1,5 @@
 
-model: ECGInceptionNet # ECGResNet # ECGConvNet     # Name of the model class (must match a model in
+model: [ECGInceptionNet, ECGResNet, ECGConvNet]     # Name of the model class (must match a model in
                       # models/model_utils.py)
 
 # ------------------------------------------------------------------------------
