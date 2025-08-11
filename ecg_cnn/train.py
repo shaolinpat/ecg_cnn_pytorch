@@ -69,6 +69,26 @@ np.random.seed(SEED)
 random.seed(SEED)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
+_DATA_CACHE = {}
+
+# --------------------------------------------------------------------------
+# Helper script
+# --------------------------------------------------------------------------
+
+
+# def get_dataset_cached(cfg):
+#     key = (cfg.sampling_rate, cfg.subsample_frac, bool(cfg.sample_only))
+#     if key not in _DATA_CACHE:
+#         if cfg.sample_only:
+#             ds = load_ptbxl_sample(
+#                 sampling_rate=cfg.sampling_rate, subsample_frac=cfg.subsample_frac
+#             )
+#         else:
+#             ds = load_ptbxl_full(
+#                 sampling_rate=cfg.sampling_rate, subsample_frac=cfg.subsample_frac
+#             )
+#         _DATA_CACHE[key] = ds
+#     return _DATA_CACHE[key]
 
 
 # ------------------------------------------------------------------------------

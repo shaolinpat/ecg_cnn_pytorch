@@ -1,16 +1,19 @@
+# ecg_cnn/utils/plot_utils.py
+
 import matplotlib.pyplot as plt
 import numpy as np
 import os
 import pandas as pd
 import seaborn as sns
-import wfdb
 
 from pathlib import Path
 from sklearn.metrics import (
-    confusion_matrix,
     classification_report,
     ConfusionMatrixDisplay,
     precision_recall_curve,
+    roc_curve,
+    roc_auc_score,
+    average_precision_score,
 )
 
 from ecg_cnn.utils.validate import (
@@ -18,6 +21,20 @@ from ecg_cnn.utils.validate import (
     validate_y_probs,
     validate_y_true_pred,
 )
+
+# ------------------------------------------------------------------------------
+# Toggle how many plots get generated
+# ------------------------------------------------------------------------------
+_ENV_ENABLE = os.getenv("ECG_PLOTS_ENABLE_OVR")  # None => default ON
+ENV_ENABLE_OVR = (
+    True
+    if _ENV_ENABLE is None
+    else _ENV_ENABLE.strip().lower() in {"1", "true", "yes", "on"}
+)
+
+_OVR_CLASSES_ENV = os.getenv("ECG_PLOTS_OVR_CLASSES", "").strip()
+ENV_OVR_CLASSES = {c.strip() for c in _OVR_CLASSES_ENV.split(",") if c.strip()} or None
+# ------------------------------------------------------------------------------
 
 
 # ------------------------------------------------------------------------------
@@ -546,6 +563,187 @@ def save_pr_threshold_curve(
     print(f"Saved PR curve {prefix.lower()} {fname_metric.lower()} plot to {out_path}")
 
 
+def save_pr_curve(
+    y_true: list[int] | np.ndarray,
+    y_probs: list[float] | np.ndarray,
+    out_folder: str | Path,
+    model: str,
+    lr: float,
+    bs: int,
+    wd: float,
+    prefix: str,
+    fname_metric: str,
+    title: str = "Precision-Recall Curve",
+    fold: int | None = None,
+    epoch: int | None = None,
+):
+    """
+    Plot and save a standard Precision-Recall curve with AUPRC in the legend/title.
+    Accepts binary (1D y_probs) or one-vs-rest multiclass (2D y_probs with shape [n, n_classes]).
+    """
+    # --- Validate ---
+    validate_y_true_pred(y_true, y_true)  # length/format only
+    validate_y_probs(y_probs)
+    if not isinstance(out_folder, (str, Path)):
+        raise ValueError("out_folder must be a string or pathlib.Path.")
+    if not isinstance(title, str):
+        raise ValueError("title must be a string.")
+
+    # Normalize path
+    out_folder = Path(out_folder)
+    out_folder.mkdir(parents=True, exist_ok=True)
+
+    y_probs = np.asarray(y_probs)
+    y_true = np.asarray(y_true)
+
+    def _one_curve(y_true_bin, y_probs_bin, suffix: str):
+        pr, rc, _ = precision_recall_curve(y_true_bin, y_probs_bin)
+        ap = average_precision_score(y_true_bin, y_probs_bin)
+
+        suffix_text = f" ({suffix})" if suffix else ""
+        plot_title = _build_plot_title(
+            model,
+            lr,
+            bs,
+            wd,
+            prefix,
+            metric=f"{title}{suffix_text}",
+            fold=fold,
+            epoch=epoch,
+        )
+        filename = (
+            format_hparams(
+                model=model,
+                lr=lr,
+                bs=bs,
+                wd=wd,
+                prefix=prefix if suffix == "" else f"{prefix}_{suffix}",
+                fname_metric=fname_metric,
+                fold=fold,
+                epoch=epoch,
+            )
+            + ".png"
+        )
+        out_path = out_folder / filename
+        fig, ax = plt.subplots(figsize=(8, 5))
+        ax.plot(rc, pr, label=f"AUPRC={ap:.4f}")
+        ax.set_xlabel("Recall")
+        ax.set_ylabel("Precision")
+        ax.set_title(plot_title)
+        ax.legend()
+        ax.grid(True)
+        fig.tight_layout()
+        fig.savefig(out_path)
+        plt.close(fig)
+        print(f"Saved PR curve to {out_path}")
+
+    # Binary
+    if y_probs.ndim == 1:
+        _one_curve(y_true, y_probs, suffix="")
+        return
+
+    # Multiclass one-vs-rest
+    if y_probs.ndim == 2 and y_probs.shape[0] == y_true.shape[0]:
+        n_classes = y_probs.shape[1]
+        for i in range(n_classes):
+            y_true_bin = (y_true == i).astype(int)
+            _one_curve(y_true_bin, y_probs[:, i], suffix=f"ovr_class{i}")
+        return
+
+    print("Skipping PR curve — y_probs shape does not match expected format.")
+
+
+def save_roc_curve(
+    y_true: list[int] | np.ndarray,
+    y_probs: list[float] | np.ndarray,
+    out_folder: str | Path,
+    model: str,
+    lr: float,
+    bs: int,
+    wd: float,
+    prefix: str,
+    fname_metric: str,
+    title: str = "ROC Curve",
+    fold: int | None = None,
+    epoch: int | None = None,
+):
+    """
+    Plot and save an ROC curve with AUROC in the legend/title.
+    Accepts binary (1D y_probs) or one-vs-rest multiclass (2D y_probs with shape [n, n_classes]).
+    """
+    # --- Validate ---
+    validate_y_true_pred(y_true, y_true)  # length/format only
+    validate_y_probs(y_probs)
+    if not isinstance(out_folder, (str, Path)):
+        raise ValueError("out_folder must be a string or pathlib.Path.")
+    if not isinstance(title, str):
+        raise ValueError("title must be a string.")
+
+    # Normalize path
+    out_folder = Path(out_folder)
+    out_folder.mkdir(parents=True, exist_ok=True)
+
+    y_probs = np.asarray(y_probs)
+    y_true = np.asarray(y_true)
+
+    def _one_curve(y_true_bin, y_probs_bin, suffix: str):
+        fpr, tpr, _ = roc_curve(y_true_bin, y_probs_bin)
+        auc_val = roc_auc_score(y_true_bin, y_probs_bin)
+
+        suffix_text = f" ({suffix})" if suffix else ""
+        plot_title = _build_plot_title(
+            model,
+            lr,
+            bs,
+            wd,
+            prefix,
+            metric=f"{title}{suffix_text}",
+            fold=fold,
+            epoch=epoch,
+        )
+        filename = (
+            format_hparams(
+                model=model,
+                lr=lr,
+                bs=bs,
+                wd=wd,
+                prefix=prefix if suffix == "" else f"{prefix}_{suffix}",
+                fname_metric=fname_metric,
+                fold=fold,
+                epoch=epoch,
+            )
+            + ".png"
+        )
+        out_path = out_folder / filename
+        fig, ax = plt.subplots(figsize=(8, 5))
+        ax.plot(fpr, tpr, label=f"AUROC={auc_val:.4f}")
+        ax.plot([0, 1], [0, 1], linestyle="--", linewidth=1)
+        ax.set_xlabel("False Positive Rate")
+        ax.set_ylabel("True Positive Rate")
+        ax.set_title(plot_title)
+        ax.legend()
+        ax.grid(True)
+        fig.tight_layout()
+        fig.savefig(out_path)
+        plt.close(fig)
+        print(f"Saved ROC curve to {out_path}")
+
+    # Binary
+    if y_probs.ndim == 1:
+        _one_curve(y_true, y_probs, suffix="")
+        return
+
+    # Multiclass one-vs-rest
+    if y_probs.ndim == 2 and y_probs.shape[0] == y_true.shape[0]:
+        n_classes = y_probs.shape[1]
+        for i in range(n_classes):
+            y_true_bin = (y_true == i).astype(int)
+            _one_curve(y_true_bin, y_probs[:, i], suffix=f"ovr_class{i}")
+        return
+
+    print("Skipping ROC curve — y_probs shape does not match expected format.")
+
+
 def save_classification_report(
     y_true: list[int] | np.ndarray,
     y_pred: list[int] | np.ndarray,
@@ -681,6 +879,8 @@ def evaluate_and_plot(
     y_probs: list[float] | np.ndarray,
     fold: int | None = None,
     epoch: int | None = None,
+    enable_ovr: bool | None = None,  # optional override (env is default)
+    ovr_classes: set[str] | None = None,  # optional override (env is default)
 ) -> None:
     """
     Generate evaluation plots and save classification report using standardized formatting.
@@ -765,6 +965,14 @@ def evaluate_and_plot(
         fname_metric=fname_metric,
         fold=fold,
         epoch=epoch,
+    )
+
+    # Effective OvR settings (env defaults unless explicitly overridden)
+    enable_ovr_effective = ENV_ENABLE_OVR if enable_ovr is None else bool(enable_ovr)
+    ovr_classes_effective = (
+        ENV_OVR_CLASSES
+        if ovr_classes is None
+        else (set(ovr_classes) if ovr_classes else None)
     )
 
     # --- Prepare output folders ---
@@ -858,6 +1066,58 @@ def evaluate_and_plot(
         epoch=epoch,
     )
 
+    # --- Standard PR curve (+AUPRC) ---
+    if isinstance(y_probs, list):
+        y_probs = np.asarray(y_probs)
+    if y_probs.ndim == 1 and len(np.unique(y_true)) == 2:
+        # Binary
+        save_pr_curve(
+            y_true=y_true,
+            y_probs=y_probs,
+            out_folder=plot_dir,
+            model=model,
+            lr=lr,
+            bs=bs,
+            wd=wd,
+            prefix=prefix,
+            fname_metric="pr_curve",
+            fold=fold,
+            epoch=epoch,
+            title="Precision-Recall Curve",
+        )
+    elif y_probs.ndim == 2 and y_probs.shape[1] == len(class_names):
+        if enable_ovr_effective:
+            if ovr_classes_effective:
+                idxs = [
+                    i for i, c in enumerate(class_names) if c in ovr_classes_effective
+                ]
+                if not idxs:
+                    idxs = range(len(class_names))
+            else:
+                idxs = range(len(class_names))
+            for i in idxs:
+                class_label = class_names[i]
+                class_slug = str(class_label).lower()
+                y_true_bin = [1 if y == i else 0 for y in y_true]
+                save_pr_curve(
+                    y_true=y_true_bin,
+                    y_probs=y_probs[:, i],
+                    out_folder=plot_dir,
+                    model=model,
+                    lr=lr,
+                    bs=bs,
+                    wd=wd,
+                    prefix=f"{prefix}_ovr_{class_slug}",
+                    fname_metric="pr_curve",
+                    fold=fold,
+                    epoch=epoch,
+                    title=f"Precision-Recall Curve (OvR: {class_label})",
+                )
+        else:
+            print("PR OvR disabled (ECG_PLOTS_ENABLE_OVR is False)")
+    else:
+        print("Skipping PR curve — y_probs shape does not match expected format")
+
     # --- Precision/Recall vs. Threshold ---
     y_probs = np.asarray(y_probs)
 
@@ -878,24 +1138,87 @@ def evaluate_and_plot(
             title=f"{model}: Precision & Recall vs Threshold ({class_names[1]} vs All)",
         )
     elif y_probs.ndim == 2 and y_probs.shape[1] == len(class_names):
-        # Multiclass One-vs-Rest
-        for i, class_label in enumerate(class_names):
-            y_true_bin = [1 if y == i else 0 for y in y_true]
-            y_probs_bin = y_probs[:, i]
+        if enable_ovr_effective:
+            if ovr_classes_effective:
+                idxs = [
+                    i for i, c in enumerate(class_names) if c in ovr_classes_effective
+                ]
+                if not idxs:
+                    idxs = range(len(class_names))
+            else:
+                idxs = range(len(class_names))
+            for i in idxs:
+                class_label = class_names[i]
+                class_slug = str(class_label).lower()
+                y_true_bin = [1 if y == i else 0 for y in y_true]
+                y_probs_bin = y_probs[:, i]
 
-            save_pr_threshold_curve(
-                y_true=y_true_bin,
-                y_probs=y_probs_bin,
-                out_folder=plot_dir,
-                model=model,
-                lr=lr,
-                bs=bs,
-                wd=wd,
-                epoch=epoch,
-                prefix=f"{prefix}_OvR_{class_label}",
-                fname_metric="pr_threshold",
-                fold=fold,
-                title=f"{model}: Precision & Recall vs Threshold (OvR: {class_label})",
-            )
+                save_pr_threshold_curve(
+                    y_true=y_true_bin,
+                    y_probs=y_probs_bin,
+                    out_folder=plot_dir,
+                    model=model,
+                    lr=lr,
+                    bs=bs,
+                    wd=wd,
+                    epoch=epoch,
+                    prefix=f"{prefix}_ovr_{class_slug}",
+                    fname_metric="pr_threshold",
+                    fold=fold,
+                    title=f"{model}: Precision & Recall vs Threshold (OvR: {class_label})",
+                )
+        else:
+            print("PR-threshold OvR disabled (ECG_PLOTS_ENABLE_OVR is False)")
     else:
         print("Skipping PR curve — y_probs shape does not match expected format")
+
+    # --- ROC curve (+AUROC) ---
+    y_probs = np.asarray(y_probs)
+    if y_probs.ndim == 1 and len(np.unique(y_true)) == 2:
+        # Binary
+        save_roc_curve(
+            y_true=y_true,
+            y_probs=y_probs,
+            out_folder=plot_dir,
+            model=model,
+            lr=lr,
+            bs=bs,
+            wd=wd,
+            prefix=prefix,
+            fname_metric="roc_curve",
+            fold=fold,
+            epoch=epoch,
+            title="ROC Curve",
+        )
+    elif y_probs.ndim == 2 and y_probs.shape[1] == len(class_names):
+        if enable_ovr_effective:
+            if ovr_classes_effective:
+                idxs = [
+                    i for i, c in enumerate(class_names) if c in ovr_classes_effective
+                ]
+                if not idxs:
+                    idxs = range(len(class_names))
+            else:
+                idxs = range(len(class_names))
+            for i in idxs:
+                class_label = class_names[i]
+                class_slug = str(class_label).lower()
+                y_true_bin = [1 if y == i else 0 for y in y_true]
+                save_roc_curve(
+                    y_true=y_true_bin,
+                    y_probs=y_probs[:, i],
+                    out_folder=plot_dir,
+                    model=model,
+                    lr=lr,
+                    bs=bs,
+                    wd=wd,
+                    prefix=f"{prefix}_ovr_{class_slug}",
+                    fname_metric="roc_curve",
+                    fold=fold,
+                    epoch=epoch,
+                    title=f"ROC Curve (OvR: {class_label})",
+                )
+        else:
+            print("ROC OvR disabled (ECG_PLOTS_ENABLE_OVR is False)")
+    else:
+        print("Skipping ROC curve — y_probs shape does not match expected format")

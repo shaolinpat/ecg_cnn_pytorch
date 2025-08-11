@@ -2,7 +2,7 @@
 
 import yaml
 
-from dataclasses import asdict, dataclass, fields, is_dataclass
+from dataclasses import asdict, dataclass, fields, is_dataclass, field
 from pathlib import Path
 from typing import get_origin, get_args, Union
 
@@ -40,6 +40,15 @@ class TrainConfig:
         Whether to print detailed status and configuration info during training.
     n_folds : int
         Number of folds to use for cross-validation (e.g., 5 for 5-fold CV).
+    plots_enable_ovr : bool
+        Whether to generate one-vs-rest (OvR) plots for each class in a
+        multi-class classification problem. When True, the evaluation code will
+        produce separate plots (e.g., PR curves, threshold vs. PR plots)
+        treating each class as the positive class against all others.
+    plots_ovr_classes : list[str]
+        Optional list of class names to include when generating OvR plots. If
+        empty or None, all classes present in `class_names` will be plotted.
+        Class names must exactly match those used during evaluation.
     """
 
     model: str
@@ -55,12 +64,13 @@ class TrainConfig:
     sample_dir: Union[str, Path, None] = None
     verbose: bool = False
     n_folds: int = 1
+    plots_enable_ovr: bool = False
+    plots_ovr_classes: list[str] = field(default_factory=list)
 
     def finalize(self) -> "TrainConfig":
         """
         Normalize fields after merging CLI/YAML overrides. Ensures booleans are valid.
         """
-        # Optional, but if booleans may still come in as None in some paths, enforce here
         if self.save_best is None:
             self.save_best = False
         if self.sample_only is None:
@@ -119,9 +129,9 @@ def load_training_config(path: Path | str, strict: bool = True) -> TrainConfig |
         raise ValueError(f"Config must be a YAML dictionary: {path}")
 
     if strict:
-        raw.pop("fold", None)  # <- Drop fold before validation
-        raw.pop("tag", None)  # <- Drop tag to avoid TrainConfig crash
-        raw.pop("config", None)  # <- Drop config path (for info only)
+        raw.pop("fold", None)  # Drop fold before validation
+        raw.pop("tag", None)  # Drop tag to avoid TrainConfig crash
+        raw.pop("config", None)  # Drop config path (for info only)
         try:
             cfg = TrainConfig(**raw)
         except TypeError as e:
@@ -172,27 +182,22 @@ def merge_configs(base: TrainConfig, override: TrainConfig | dict) -> TrainConfi
 
     for f in fields(base):
         name = f.name
-        # override_val = override_dict.get(name, None)
 
-        # if override_val is None:
-        #     continue
         if name not in override_dict:
             continue
         override_val = override_dict[name]
 
         expected_type = f.type
+        origin = get_origin(expected_type)
 
-        if get_origin(expected_type) is Union:
-            accepted_types = tuple(get_args(expected_type))
+        if origin is Union:
+            # e.g., Union[str, Path, None]
+            accepted_types = tuple(get_args(expected_type))  # (str, Path, NoneType)
+        elif origin is not None:
+            # e.g., list[str] => treat as list for isinstance
+            accepted_types = (origin,)  # (list,)
         else:
             accepted_types = (expected_type,)
-
-        # if get_origin(expected_type) is Union:
-        #     accepted_types = tuple(
-        #         t for t in get_args(expected_type) if t is not type(None)
-        #     )
-        # else:
-        #     accepted_types = (expected_type,)
 
         if isinstance(override_val, accepted_types):
             base_dict[name] = override_val

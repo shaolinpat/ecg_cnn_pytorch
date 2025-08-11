@@ -2,12 +2,12 @@
 
 import argparse
 import json
-import time
-
 import matplotlib.pyplot as plt
 import numpy as np
+import os
 import pandas as pd
 import seaborn as sns
+import time
 import torch
 import torch.nn as nn
 from pathlib import Path
@@ -269,6 +269,28 @@ def main(fold_override=None):
     print(f"val_loss: {val_loss}")
     print(f"best_fold: {best_fold}")
 
+    # --- YAML defaults (config is a TrainConfig object, not a dict)
+    enable_ovr_cfg = bool(getattr(config, "plots_enable_ovr", False))
+    ovr_classes_cfg = getattr(config, "plots_ovr_classes", []) or []
+    if not isinstance(ovr_classes_cfg, list):
+        ovr_classes_cfg = []
+
+    _env_enable = os.getenv("ECG_PLOTS_ENABLE_OVR")
+    _env_classes = os.getenv("ECG_PLOTS_OVR_CLASSES")
+
+    if _env_enable is not None:
+        enable_ovr_cfg = _env_enable.strip() in {"1", "true", "True"}
+
+    if _env_classes is not None:
+        # Empty string => enable OvR for all classes (no filter)
+        ovr_classes_cfg = [c.strip() for c in _env_classes.split(",") if c.strip()]
+        # If classes were specified without an explicit enable/disable, implicitly enable
+        if _env_enable is None:
+            enable_ovr_cfg = True
+
+    # Normalize for plot_utils API
+    ovr_classes_set = set(ovr_classes_cfg) if ovr_classes_cfg else None
+
     evaluate_and_plot(
         y_true=y_true_ep,
         y_pred=y_pred_ep,
@@ -287,6 +309,8 @@ def main(fold_override=None):
         y_probs=y_probs,
         fold=(best_fold if best_fold is not None else None),
         epoch=best_epoch,
+        enable_ovr=enable_ovr_cfg,
+        ovr_classes=ovr_classes_set,
     )
 
     print(f"Elapsed time: {(time.time() - t0) / 60:.2f} minutes")

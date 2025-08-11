@@ -16,6 +16,9 @@ import torch
 from collections import Counter
 from pathlib import Path
 from torch.utils.data import Dataset
+from typing import Optional
+
+from ecg_cnn.paths import PROJECT_ROOT, PTBXL_DATA_DIR
 
 SEED = 22
 
@@ -424,9 +427,25 @@ def load_ptbxl_sample(sample_dir, ptb_path):
     - Assumes that ECG signal files are in CSV format with 12 columns (one per lead).
     """
 
-    # Normalize path inputs
-    sample_dir = Path(sample_dir)
-    ptb_path = Path(ptb_path)
+    # ----------------------------------------
+    # Resolve defaults and normalize path inputs
+    # ----------------------------------------
+
+    # sample_dir: allow None -> default to repo's data/sample
+    if sample_dir is None:
+        sample_dir = PROJECT_ROOT / "data" / "sample"
+    elif isinstance(sample_dir, (str, Path)):
+        sample_dir = Path(sample_dir)
+    else:
+        raise TypeError(f"sample_dir must be str|Path|None, got {type(sample_dir)}")
+
+    # ptb_path: allow None -> default to PTBXL_DATA_DIR
+    if ptb_path is None:
+        ptb_path = PTBXL_DATA_DIR
+    elif isinstance(ptb_path, (str, Path)):
+        ptb_path = Path(ptb_path)
+    else:
+        raise TypeError(f"ptb_path must be str|Path|None, got {type(ptb_path)}")
 
     # -----------------------------
     # Input validation

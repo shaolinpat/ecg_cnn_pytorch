@@ -428,10 +428,11 @@ def test_format_hparams_keyword_only():
 # ------------------------------------------------------------------------------
 
 
-def test_save_plot_curves_valid():
+def test_save_plot_curves_valid(tmp_path):
     x_vals = list(range(10))
     y_vals = [v * 0.9 for v in x_vals]
-    out_dir = Path(tempfile.mkdtemp())
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
     default_hparams = default_hparam_kwargs()
 
     save_plot_curves(
@@ -460,15 +461,17 @@ def test_save_plot_curves_valid():
         ("y_vals", [1.0, None, 2.0]),
     ],
 )
-def test_save_plot_curves_invalid_x_y_inputs(bad_input):
+def test_save_plot_curves_invalid_x_y_inputs(bad_input, tmp_path):
     key, bad_value = bad_input
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
     kwargs = dict(
         x_vals=list(range(5)),
         y_vals=[v * 0.9 for v in range(5)],
         x_label="Epoch",
         y_label="Loss",
         title_metric="Loss Curve",
-        out_folder=tempfile.mkdtemp(),
+        out_folder=out_dir,
         **default_hparam_kwargs(),
     )
     kwargs[key] = bad_value
@@ -476,7 +479,9 @@ def test_save_plot_curves_invalid_x_y_inputs(bad_input):
         save_plot_curves(**kwargs)
 
 
-def test_save_plot_curves_length_mismatch_x_y():
+def test_save_plot_curves_length_mismatch_x_y(tmp_path):
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
     with pytest.raises(ValueError, match="same length"):
         save_plot_curves(
             x_vals=[0, 1, 2],
@@ -484,7 +489,7 @@ def test_save_plot_curves_length_mismatch_x_y():
             x_label="Epoch",
             y_label="Loss",
             title_metric="Loss",
-            out_folder=tempfile.mkdtemp(),
+            out_folder=out_dir,
             **default_hparam_kwargs(),
         )
 
@@ -493,14 +498,17 @@ def test_save_plot_curves_length_mismatch_x_y():
     "param",
     ["x_label", "y_label", "title_metric", "prefix"],
 )
-def test_save_plot_curves_bad_string_inputs(param):
+def test_save_plot_curves_bad_string_inputs(param, tmp_path):
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
     kwargs = dict(
         x_vals=[1, 2, 3],
         y_vals=[1, 2, 3],
         x_label="Epoch",
         y_label="Accuracy",
         title_metric="Model Accuracy",
-        out_folder=tempfile.mkdtemp(),
+        out_folder=out_dir,
         **default_hparam_kwargs(),
     )
     kwargs[param] = "  "  # Empty-ish string
@@ -508,9 +516,10 @@ def test_save_plot_curves_bad_string_inputs(param):
         save_plot_curves(**kwargs)
 
 
-def test_save_plot_curves_path_vs_str_for_output_folder():
+def test_save_plot_curves_path_vs_str_for_output_folder(tmp_path):
     # Should work with either Path or str
-    tmp_dir = tempfile.mkdtemp()
+    tmp_dir = tmp_path / "plots"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
     for out in [tmp_dir, Path(tmp_dir)]:
         save_plot_curves(
             x_vals=list(range(5)),
@@ -523,8 +532,11 @@ def test_save_plot_curves_path_vs_str_for_output_folder():
         )
 
 
-def test_save_plot_curves_non_arraylike_x_vals_raises():
+def test_save_plot_curves_non_arraylike_x_vals_raises(tmp_path):
     # Triggers: if not hasattr(arr, "__len__")
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
     with pytest.raises(ValueError, match="x_vals must be array-like"):
         save_plot_curves(
             x_vals=object(),  # not array-like
@@ -532,7 +544,7 @@ def test_save_plot_curves_non_arraylike_x_vals_raises():
             x_label="Epoch",
             y_label="Accuracy",
             title_metric="Accuracy",
-            out_folder=tempfile.mkdtemp(),
+            out_folder=out_dir,
             **default_hparam_kwargs(),
         )
 
@@ -570,11 +582,12 @@ def test_save_plot_curves_invalid_out_folder_type_raises():
 # ------------------------------------------------------------------------------
 
 
-def test_save_confusion_matrix_valid():
+def test_save_confusion_matrix_valid(tmp_path):
     y_true = [0, 1, 2, 2, 1]
     y_pred = [0, 2, 1, 2, 1]
     class_names = ["A", "B", "C"]
-    out_dir = Path(tempfile.mkdtemp())
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
     default_hparams = default_hparam_kwargs()
 
     save_confusion_matrix(
@@ -591,11 +604,12 @@ def test_save_confusion_matrix_valid():
     assert "some_metric" in files[0].name
 
 
-def test_save_confusion_matrix_valid_normalize_false():
+def test_save_confusion_matrix_valid_normalize_false(tmp_path):
     y_true = [0, 1, 2, 2, 1]
     y_pred = [0, 2, 1, 2, 1]
     class_names = ["A", "B", "C"]
-    out_dir = Path(tempfile.mkdtemp())
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
     default_hparams = default_hparam_kwargs()
 
     save_confusion_matrix(
@@ -612,8 +626,9 @@ def test_save_confusion_matrix_valid_normalize_false():
     assert "Normalized" not in files[0].name
 
 
-def test_save_confusion_matrix_valid_fold_not_present():
-    out_dir = Path(tempfile.mkdtemp())
+def test_save_confusion_matrix_valid_fold_not_present(tmp_path):
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
     save_confusion_matrix(
         y_true=[0, 1, 2],
         y_pred=[0, 1, 2],
@@ -639,24 +654,30 @@ def test_save_confusion_matrix_valid_fold_not_present():
         [1.0, 2.0, 3.0],  # floats instead of ints
     ],
 )
-def test_save_confusion_matrix_invalid_y_true(bad_y_true):
+def test_save_confusion_matrix_invalid_y_true(bad_y_true, tmp_path):
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
     with pytest.raises(ValueError, match="y_true must contain only integer values"):
         save_confusion_matrix(
             y_true=bad_y_true,
             y_pred=[0, 1, 2],
             class_names=["A", "B", "C"],
-            out_folder=tempfile.mkdtemp(),
+            out_folder=out_dir,
             **default_hparam_kwargs(),
         )
 
 
-def test_save_confusion_matrix_y_true_not_list():
+def test_save_confusion_matrix_y_true_not_list(tmp_path):
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
     with pytest.raises(ValueError, match="y_true must be list or ndarray"):
         save_confusion_matrix(
             y_true="123",
             y_pred=[0, 1, 2],
             class_names=["A", "B", "C"],
-            out_folder=tempfile.mkdtemp(),
+            out_folder=out_dir,
             **default_hparam_kwargs(),
         )
 
@@ -668,46 +689,56 @@ def test_save_confusion_matrix_y_true_not_list():
         [True, False, 1],
     ],
 )
-def test_save_confusion_matrix_invalid_y_pred(bad_y_pred):
+def test_save_confusion_matrix_invalid_y_pred(bad_y_pred, tmp_path):
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
     with pytest.raises(ValueError, match="y_pred must contain only integer values"):
         save_confusion_matrix(
             y_true=[0, 1, 2],
             y_pred=bad_y_pred,
             class_names=["A", "B", "C"],
-            out_folder=tempfile.mkdtemp(),
+            out_folder=out_dir,
             **default_hparam_kwargs(),
         )
 
 
-def test_save_confusion_matrix_y_pred_none():
+def test_save_confusion_matrix_y_pred_none(tmp_path):
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
     with pytest.raises(ValueError, match="y_pred must be list or ndarray"):
         save_confusion_matrix(
             y_true=[0, 1, 2],
             y_pred=None,
             class_names=["A", "B", "C"],
-            out_folder=tempfile.mkdtemp(),
+            out_folder=out_dir,
             **default_hparam_kwargs(),
         )
 
 
-def test_save_confusion_matrix_mismatched_lengths():
+def test_save_confusion_matrix_mismatched_lengths(tmp_path):
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
     with pytest.raises(ValueError, match="must be the same length"):
         save_confusion_matrix(
             y_true=[0, 1],
             y_pred=[0, 1, 2],
             class_names=["A", "B", "C"],
-            out_folder=tempfile.mkdtemp(),
+            out_folder=out_dir,
             **default_hparam_kwargs(),
         )
 
 
-def test_save_confusion_matrix_invalid_class_names():
+def test_save_confusion_matrix_invalid_class_names(tmp_path):
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
     with pytest.raises(ValueError, match="class_names must be a list of strings"):
         save_confusion_matrix(
             y_true=[0, 1, 2],
             y_pred=[0, 1, 2],
             class_names="A,B,C",  # not a list
-            out_folder=tempfile.mkdtemp(),
+            out_folder=out_dir,
             **default_hparam_kwargs(),
         )
 
@@ -723,13 +754,16 @@ def test_save_confusion_matrix_invalid_out_folder():
         )
 
 
-def test_save_confusion_matrix_fold_too_small():
+def test_save_confusion_matrix_fold_too_small(tmp_path):
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
     with pytest.raises(ValueError, match="fold must be a positive integer."):
         save_confusion_matrix(
             y_true=[0, 1, 2],
             y_pred=[0, 1, 2],
             class_names=["A", "B", "C"],
-            out_folder="out_folder",
+            out_folder=out_dir,
             model="SomeModel",
             lr=0.001,
             bs=64,
@@ -741,13 +775,16 @@ def test_save_confusion_matrix_fold_too_small():
         )
 
 
-def test_save_confusion_matrix_fold_not_int():
+def test_save_confusion_matrix_fold_not_int(tmp_path):
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
     with pytest.raises(ValueError, match="fold must be a positive integer."):
         save_confusion_matrix(
             y_true=[0, 1, 2],
             y_pred=[0, 1, 2],
             class_names=["A", "B", "C"],
-            out_folder="out_folder",
+            out_folder=out_dir,
             model="SomeModel",
             lr=0.001,
             bs=64,
@@ -759,18 +796,20 @@ def test_save_confusion_matrix_fold_not_int():
         )
 
 
-def test_confusion_matrix_class_names_too_short():
+def test_confusion_matrix_class_names_too_short(tmp_path):
     y_true = [0, 1, 2]  # max index = 2
     y_pred = [0, 1, 2]
     class_names = ["A", "B"]  # only indices 0 and 1 valid
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     with pytest.raises(ValueError, match="class_names must cover all class indices"):
         save_confusion_matrix(
             y_true=y_true,
             y_pred=y_pred,
             class_names=class_names,
-            out_folder="outputs/",
-            model="TestModel",
+            out_folder=out_dir,
+            model="TestModel2",
             lr=0.001,
             bs=64,
             wd=0.0,
@@ -780,18 +819,20 @@ def test_confusion_matrix_class_names_too_short():
         )
 
 
-def test_confusion_matrix_class_names_exact_match():
+def test_confusion_matrix_class_names_exact_match(tmp_path):
     y_true = [0, 1, 2]
     y_pred = [0, 1, 2]
     class_names = ["A", "B", "G"]
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     try:
         save_confusion_matrix(
             y_true=y_true,
             y_pred=y_pred,
             class_names=class_names,
-            out_folder="outputs/",
-            model="TestModel",
+            out_folder=out_dir,
+            model="TestModel3",
             lr=0.001,
             bs=64,
             wd=0.0,
@@ -829,8 +870,8 @@ def test_save_pr_threshold_curve_success(good_y_true, good_y_probs, tmp_path):
     """
     Test that the PR-threshold curve is successfully saved with valid input.
     """
-
-    out_folder = tmp_path / "plots"
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
     title = "Test PR Threshold Curve"
     default_hparams = default_hparam_kwargs()
 
@@ -838,7 +879,7 @@ def test_save_pr_threshold_curve_success(good_y_true, good_y_probs, tmp_path):
     save_pr_threshold_curve(
         y_true=good_y_true,
         y_probs=good_y_probs,
-        out_folder=out_folder,
+        out_folder=out_dir,
         title=title,
         **default_hparams,
     )
@@ -846,7 +887,7 @@ def test_save_pr_threshold_curve_success(good_y_true, good_y_probs, tmp_path):
     # Construct expected output path
     expected_fname = format_hparams(**default_hparams) + ".png"
 
-    out_path = out_folder / expected_fname
+    out_path = out_dir / expected_fname
 
     assert out_path.exists(), f"Expected output file not found: {out_path}"
     assert out_path.is_file(), "Output path is not a file"
@@ -856,7 +897,8 @@ def test_save_pr_threshold_curve_success(good_y_true, good_y_probs, tmp_path):
 def test_save_pr_threshold_curve_invalid_y_true_types(bad_input, tmp_path):
     y_probs = [0.1, 0.2, 0.3]
 
-    out_folder = tmp_path / "plots"
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
     default_hparams = default_hparam_kwargs()
     title = "Test PR Threshold Curve"
 
@@ -864,7 +906,7 @@ def test_save_pr_threshold_curve_invalid_y_true_types(bad_input, tmp_path):
         save_pr_threshold_curve(
             y_true=bad_input,
             y_probs=y_probs,
-            out_folder=out_folder,
+            out_folder=out_dir,
             **default_hparams,
             title=title,
         )
@@ -874,7 +916,8 @@ def test_save_pr_threshold_curve_invalid_y_true_types(bad_input, tmp_path):
 def test_save_pr_threshold_curve_y_true_contains_non_ints(bad_input, tmp_path):
     y_probs = [0.1, 0.2, 0.3]
 
-    out_folder = tmp_path / "plots"
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
     default_hparams = default_hparam_kwargs()
     title = "Test PR Threshold Curve"
 
@@ -884,7 +927,7 @@ def test_save_pr_threshold_curve_y_true_contains_non_ints(bad_input, tmp_path):
         save_pr_threshold_curve(
             y_true=bad_input,
             y_probs=y_probs,
-            out_folder=out_folder,
+            out_folder=out_dir,
             **default_hparams,
             title=title,
         )
@@ -894,7 +937,8 @@ def test_save_pr_threshold_curve_y_true_contains_non_ints(bad_input, tmp_path):
 def test_save_pr_threshold_curve_invalid_y_probs_types(bad_input, tmp_path):
     y_true = [1, 2, 3]
 
-    out_folder = tmp_path / "plots"
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
     default_hparams = default_hparam_kwargs()
     title = "Test PR Threshold Curve"
 
@@ -902,7 +946,7 @@ def test_save_pr_threshold_curve_invalid_y_probs_types(bad_input, tmp_path):
         save_pr_threshold_curve(
             y_true=y_true,
             y_probs=bad_input,
-            out_folder=out_folder,
+            out_folder=out_dir,
             **default_hparams,
             title=title,
         )
@@ -912,7 +956,8 @@ def test_save_pr_threshold_curve_invalid_y_probs_types(bad_input, tmp_path):
 def test_save_pr_threshold_curve_y_probs_contains_non_floats(bad_input, tmp_path):
     y_true = [1, 0, 1]
 
-    out_folder = tmp_path / "plots"
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
     default_hparams = default_hparam_kwargs()
     title = "Test PR Threshold Curve"
 
@@ -920,7 +965,7 @@ def test_save_pr_threshold_curve_y_probs_contains_non_floats(bad_input, tmp_path
         save_pr_threshold_curve(
             y_true=y_true,
             y_probs=bad_input,
-            out_folder=out_folder,
+            out_folder=out_dir,
             **default_hparams,
             title=title,
         )
@@ -932,7 +977,8 @@ def test_save_pr_threshold_curve_y_probs_contains_values_out_of_range(
 ):
     y_true = [1, 0]
 
-    out_folder = tmp_path / "plots"
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
     default_hparams = default_hparam_kwargs()
     title = "Test PR Threshold Curve"
 
@@ -942,7 +988,7 @@ def test_save_pr_threshold_curve_y_probs_contains_values_out_of_range(
         save_pr_threshold_curve(
             y_true=y_true,
             y_probs=bad_input,
-            out_folder=out_folder,
+            out_folder=out_dir,
             **default_hparams,
             title=title,
         )
@@ -952,7 +998,8 @@ def test_save_pr_threshold_curve_y_true_andy_probs_different_lengths(tmp_path):
     y_true = [1, 2, 3]
     y_probs = [0.1, 0.3]
 
-    out_folder = tmp_path / "plots"
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
     default_hparams = default_hparam_kwargs()
     title = "Test PR Threshold Curve"
 
@@ -960,17 +1007,17 @@ def test_save_pr_threshold_curve_y_true_andy_probs_different_lengths(tmp_path):
         save_pr_threshold_curve(
             y_true=y_true,
             y_probs=y_probs,
-            out_folder=out_folder,
+            out_folder=out_dir,
             **default_hparams,
             title=title,
         )
 
 
-def test_save_pr_threshold_curve_invalid_outfolder(tmp_path):
+def test_save_pr_threshold_curve_invalid_outfolder():
     y_true = [1, 1, 0]
     y_probs = [0.1, 0.3, 0.3]
 
-    out_folder = 22
+    out_dir = 22
     default_hparams = default_hparam_kwargs()
     title = "Test PR Threshold Curve"
 
@@ -978,7 +1025,7 @@ def test_save_pr_threshold_curve_invalid_outfolder(tmp_path):
         save_pr_threshold_curve(
             y_true=y_true,
             y_probs=y_probs,
-            out_folder=out_folder,
+            out_folder=out_dir,
             **default_hparams,
             title=title,
         )
@@ -988,15 +1035,15 @@ def test_save_pr_threshold_curve_title_not_string(tmp_path):
     y_true = [1, 1, 0]
     y_probs = [0.1, 0.3, 0.3]
 
-    out_folder = "tmp/folder"
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
     default_hparams = default_hparam_kwargs()
-    title = "Test PR Threshold Curve"
 
     with pytest.raises(ValueError, match="title must be a string"):
         save_pr_threshold_curve(
             y_true=y_true,
             y_probs=y_probs,
-            out_folder=out_folder,
+            out_folder=out_dir,
             **default_hparams,
             title=3,
         )
@@ -1028,18 +1075,20 @@ def test_save_classification_report_success(tmp_path):
     y_true = [0, 1, 0, 1, 1]
     y_pred = [0, 1, 1, 1, 0]
     class_names = ["NORM", "MI"]
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
     hparams = default_hparam_kwargs()
 
     save_classification_report(
         y_true=y_true,
         y_pred=y_pred,
         class_names=class_names,
-        out_folder=tmp_path,
+        out_folder=out_dir,
         **hparams,
     )
 
     filename = format_hparams(**hparams)
-    out_path_png = tmp_path / f"{filename}.png"
+    out_path_png = out_dir / f"{filename}.png"
 
     assert out_path_png.exists(), "Missing heatmap .png"
 
@@ -1051,6 +1100,8 @@ def test_save_classification_report_success(tmp_path):
 def test_save_classification_report_invalid_y_true(bad_y_true, tmp_path):
     y_pred = [0, 1, 1]
     class_names = ["A", "B"]
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
     hparams = default_hparam_kwargs()
 
     with pytest.raises(ValueError, match="y_true must be list or ndarray"):
@@ -1058,7 +1109,7 @@ def test_save_classification_report_invalid_y_true(bad_y_true, tmp_path):
             y_true=bad_y_true,
             y_pred=y_pred,
             class_names=class_names,
-            out_folder=tmp_path,
+            out_folder=out_dir,
             **hparams,
         )
 
@@ -1070,6 +1121,8 @@ def test_save_classification_report_invalid_y_true(bad_y_true, tmp_path):
 def test_save_classification_report_invalid_y_pred(bad_y_pred, tmp_path):
     y_true = [0, 1]
     class_names = ["A", "B"]
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
     hparams = default_hparam_kwargs()
 
     expected_message = (
@@ -1083,19 +1136,21 @@ def test_save_classification_report_invalid_y_pred(bad_y_pred, tmp_path):
             y_true=y_true,
             y_pred=bad_y_pred,
             class_names=class_names,
-            out_folder=tmp_path,
+            out_folder=out_dir,
             **hparams,
         )
 
 
 def test_save_classification_report_y_true_with_bools(tmp_path):
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
     hparams = default_hparam_kwargs()
     with pytest.raises(ValueError, match="y_true must contain only integer values"):
         save_classification_report(
             y_true=[0, 1, True],  # Bool value should trigger rejection
             y_pred=[0, 1, 0],
             class_names=["A", "B"],
-            out_folder=tmp_path,
+            out_folder=out_dir,
             **hparams,
         )
 
@@ -1107,6 +1162,8 @@ def test_save_classification_report_mismatched_lengths(tmp_path):
     y_true = [0, 1]
     y_pred = [0, 1, 1]
     class_names = ["A", "B"]
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
     hparams = default_hparam_kwargs()
 
     with pytest.raises(ValueError, match="y_true and y_pred must be the same length"):
@@ -1114,7 +1171,7 @@ def test_save_classification_report_mismatched_lengths(tmp_path):
             y_true=y_true,
             y_pred=y_pred,
             class_names=class_names,
-            out_folder=tmp_path,
+            out_folder=out_dir,
             **hparams,
         )
 
@@ -1126,6 +1183,8 @@ def test_save_classification_report_class_names_not_a_list(tmp_path):
     y_true = [0, 1, 1]
     y_pred = [0, 1, 1]
     class_names = "A"
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
     hparams = default_hparam_kwargs()
 
     with pytest.raises(ValueError, match="class_names must be a list of strings"):
@@ -1133,7 +1192,7 @@ def test_save_classification_report_class_names_not_a_list(tmp_path):
             y_true=y_true,
             y_pred=y_pred,
             class_names=class_names,
-            out_folder=tmp_path,
+            out_folder=out_dir,
             **hparams,
         )
 
@@ -1142,6 +1201,8 @@ def test_save_classification_report_class_names_not_a_list_of_strings(tmp_path):
     y_true = [0, 1, 1]
     y_pred = [0, 1, 1]
     class_names = ["A", 3]
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
     hparams = default_hparam_kwargs()
 
     with pytest.raises(ValueError, match="class_names must be a list of strings"):
@@ -1149,7 +1210,7 @@ def test_save_classification_report_class_names_not_a_list_of_strings(tmp_path):
             y_true=y_true,
             y_pred=y_pred,
             class_names=class_names,
-            out_folder=tmp_path,
+            out_folder=out_dir,
             **hparams,
         )
 
@@ -1177,10 +1238,12 @@ def test_save_classification_report_invalid_out_folder(bad_out):
 # ------------------------------------------------------------------------------
 # Invalid title
 # ------------------------------------------------------------------------------
-def test_save_classification_report_title_not_string():
+def test_save_classification_report_title_not_string(tmp_path):
     y_true = [0, 1]
     y_pred = [0, 1]
     class_names = ["A", "B"]
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
     hparams = default_hparam_kwargs()
 
     with pytest.raises(ValueError, match="title must be a string"):
@@ -1188,7 +1251,7 @@ def test_save_classification_report_title_not_string():
             y_true=y_true,
             y_pred=y_pred,
             class_names=class_names,
-            out_folder="tmp/out",
+            out_folder=out_dir,
             **hparams,
             title=3,
         )
@@ -1224,6 +1287,9 @@ def test_evaluate_and_plot_success(tmp_path):
     y_true = [0, 1, 0]
     y_pred = [0, 1, 1]
     y_probs = [0.3, 0.2, 0.3]
+    out_dir = tmp_path
+    # out_dir = tmp_path / "reports"
+    # out_dir.mkdir(parents=True, exist_ok=True)
     hparams = default_hparam_kwargs()
 
     evaluate_and_plot(
@@ -1233,7 +1299,7 @@ def test_evaluate_and_plot_success(tmp_path):
         val_accs=dummy_accs,
         train_losses=dummy_losses,
         val_losses=dummy_losses,
-        out_folder=tmp_path,
+        out_folder=out_dir,
         class_names=class_names,
         y_probs=y_probs,
         **hparams,
@@ -1252,7 +1318,7 @@ def test_evaluate_and_plot_success(tmp_path):
     )
 
     # The report (heatmap) is saved under reports/
-    assert (tmp_path / "reports" / f"{report_fname}.png").exists()
+    assert (out_dir / "reports" / f"{report_fname}.png").exists()
 
 
 @pytest.mark.parametrize(
@@ -1271,6 +1337,8 @@ def test_evaluate_and_plot_invalid_y_true(bad_val, err_msg, tmp_path):
     # don’t trip the length check before the intended validation.
     y_pred = [0, 1, 0]
     y_probs = [0.2, 0.2, 0.5]
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     if isinstance(bad_val, list):
         y_pred = y_pred[: len(bad_val)]
@@ -1283,7 +1351,7 @@ def test_evaluate_and_plot_invalid_y_true(bad_val, err_msg, tmp_path):
             val_accs=dummy_accs,
             train_losses=dummy_losses,
             val_losses=dummy_losses,
-            out_folder=tmp_path,
+            out_folder=out_dir,
             class_names=class_names,
             y_probs=y_probs,
             **hparams,
@@ -1304,6 +1372,8 @@ def test_evaluate_and_plot_invalid_y_pred(bad_val, err_msg, tmp_path):
     hparams = default_hparam_kwargs()
     y_true = [0, 1, 0]
     y_probs = [0.0, 0.1, 0.3]
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     # Only align lengths when we're *not* testing for the mismatch error
     if (
@@ -1321,7 +1391,7 @@ def test_evaluate_and_plot_invalid_y_pred(bad_val, err_msg, tmp_path):
             val_accs=dummy_accs,
             train_losses=dummy_losses,
             val_losses=dummy_losses,
-            out_folder=tmp_path,
+            out_folder=out_dir,
             class_names=class_names,
             y_probs=y_probs,
             **hparams,
@@ -1339,6 +1409,8 @@ def test_evaluate_and_plot_invalid_y_pred(bad_val, err_msg, tmp_path):
 )
 def test_evaluate_and_plot_invalid_class_names(bad_val, err_msg, tmp_path):
     hparams = default_hparam_kwargs()
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
     with pytest.raises(ValueError, match=err_msg):
         evaluate_and_plot(
             y_true=[0, 1, 0],
@@ -1347,7 +1419,7 @@ def test_evaluate_and_plot_invalid_class_names(bad_val, err_msg, tmp_path):
             val_accs=dummy_accs,
             train_losses=dummy_losses,
             val_losses=dummy_losses,
-            out_folder=tmp_path,
+            out_folder=out_dir,
             class_names=bad_val,
             y_probs=[0.2, 0.3, 0.2],
             **hparams,
@@ -1374,6 +1446,8 @@ def test_evaluate_and_plot_invalid_out_folder(bad_val):
 
 def test_evaluate_and_plot_mismatched_metrics(tmp_path):
     hparams = default_hparam_kwargs()
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     # Deliberately make val_accs shorter
     bad_val_accs = [0.8, 0.85]  # should be 3 long
@@ -1386,7 +1460,7 @@ def test_evaluate_and_plot_mismatched_metrics(tmp_path):
             val_accs=bad_val_accs,
             train_losses=dummy_losses,
             val_losses=dummy_losses,
-            out_folder=tmp_path,
+            out_folder=out_dir,
             class_names=class_names,
             y_probs=[0.3],
             **hparams,
@@ -1394,6 +1468,9 @@ def test_evaluate_and_plot_mismatched_metrics(tmp_path):
 
 
 def test_evaluate_and_plot_fold_is_none(tmp_path):
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
     # does not raise
     evaluate_and_plot(
         y_true=[0, 1, 0],
@@ -1408,7 +1485,7 @@ def test_evaluate_and_plot_fold_is_none(tmp_path):
         wd=0.0,
         prefix="test",
         fname_metric="some_metric",
-        out_folder=tmp_path,
+        out_folder=out_dir,
         class_names=class_names,
         y_probs=[0.33, 0.22, 0.55],
         fold=None,
@@ -1417,6 +1494,9 @@ def test_evaluate_and_plot_fold_is_none(tmp_path):
 
 
 def test_evaluate_and_plot_fold_not_int(tmp_path):
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
     with pytest.raises(
         ValueError, match="fold must be a positive integer if provided."
     ):
@@ -1433,7 +1513,7 @@ def test_evaluate_and_plot_fold_not_int(tmp_path):
             wd=0.0,
             prefix="test",
             fname_metric="some_metric",
-            out_folder=tmp_path,
+            out_folder=out_dir,
             class_names=class_names,
             y_probs=[0.0],
             fold="0",
@@ -1442,6 +1522,9 @@ def test_evaluate_and_plot_fold_not_int(tmp_path):
 
 
 def test_evaluate_and_plot_fold_not_int_but_float(tmp_path):
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
     with pytest.raises(
         ValueError, match="fold must be a positive integer if provided."
     ):
@@ -1458,7 +1541,7 @@ def test_evaluate_and_plot_fold_not_int_but_float(tmp_path):
             wd=0.0,
             prefix="test",
             fname_metric="some_metric",
-            out_folder=tmp_path,
+            out_folder=out_dir,
             class_names=class_names,
             y_probs=[0.2],
             fold=6.0,
@@ -1467,6 +1550,9 @@ def test_evaluate_and_plot_fold_not_int_but_float(tmp_path):
 
 
 def test_evaluate_and_plot_fold_too_small(tmp_path):
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
     with pytest.raises(
         ValueError, match="fold must be a positive integer if provided."
     ):
@@ -1483,7 +1569,7 @@ def test_evaluate_and_plot_fold_too_small(tmp_path):
             wd=0.0,
             prefix="test",
             fname_metric="some_metric",
-            out_folder=tmp_path,
+            out_folder=out_dir,
             class_names=class_names,
             y_probs=[0.2],
             fold=0,
@@ -1492,6 +1578,8 @@ def test_evaluate_and_plot_fold_too_small(tmp_path):
 
 
 def test_evaluate_and_plot_class_names_too_short(tmp_path):
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
     y_true = [0, 1, 2]  # max index = 2
     y_pred = [0, 1, 2]
     class_names = ["A", "B"]  # only indices 0 and 1 valid
@@ -1510,7 +1598,7 @@ def test_evaluate_and_plot_class_names_too_short(tmp_path):
             wd=0.0,
             prefix="test",
             fname_metric="some_metric",
-            out_folder=tmp_path,
+            out_folder=out_dir,
             class_names=class_names,
             y_probs=[0.2, 0.0, 0.3],
             fold=1,
@@ -1519,6 +1607,8 @@ def test_evaluate_and_plot_class_names_too_short(tmp_path):
 
 
 def test_evaluate_and_plot_class_names_exact_match(tmp_path):
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
     y_true = [0, 1, 2]  # max index = 2
     y_pred = [0, 1, 2]
     class_names = ["A", "B", "G"]
@@ -1537,7 +1627,7 @@ def test_evaluate_and_plot_class_names_exact_match(tmp_path):
             wd=0.0,
             prefix="test",
             fname_metric="some_metric",
-            out_folder=tmp_path,
+            out_folder=out_dir,
             class_names=class_names,
             y_probs=[0.2, 0.0, 0.3],
             fold=1,
@@ -1552,10 +1642,10 @@ def test_evaluate_and_plot_skips_invalid_y_probs_shape(tmp_path, capsys):
     y_pred = [0, 1, 1, 2]
     y_probs = np.array([0.8, 0.6, 0.7, 0.2])  # 1D array — invalid shape for OvR
 
-    out_folder = tmp_path / "plots"
-    out_folder.mkdir()
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-    model = "TestModel"
+    model = "TestModel4"
     class_names = ["A", "B", "C"]
 
     evaluate_and_plot(
@@ -1567,7 +1657,7 @@ def test_evaluate_and_plot_skips_invalid_y_probs_shape(tmp_path, capsys):
         val_losses=dummy_losses,
         y_probs=y_probs,
         class_names=class_names,
-        out_folder=out_folder,
+        out_folder=out_dir,
         model=model,
         lr=0.001,
         bs=32,
@@ -1595,10 +1685,8 @@ def test_evaluate_and_plot_ovr_pr_curve(tmp_path):
     )
     class_names = ["NORM", "MI", "STTC"]
 
-    # out_dir = tmp_path / "plots"
-    # out_dir.mkdir()
-    out_dir = tmp_path
-    (out_dir / "plots").mkdir()
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     evaluate_and_plot(
         y_true=y_true,
@@ -1610,7 +1698,7 @@ def test_evaluate_and_plot_ovr_pr_curve(tmp_path):
         y_probs=y_probs,
         class_names=class_names,
         out_folder=out_dir,
-        model="TestModel",
+        model="TestModel1",
         lr=0.001,
         bs=64,
         wd=0.0,
@@ -1627,3 +1715,77 @@ def test_evaluate_and_plot_ovr_pr_curve(tmp_path):
             )
         )
         assert found, f"No plot saved for class {label}"
+
+
+def _h():  # quick helper for common hparams
+    return dict(
+        model="M", lr=0.001, bs=8, wd=0.0, prefix="t", fname_metric="m", fold=1, epoch=1
+    )
+
+
+def _mc_probs():  # 4 samples, 3 classes
+    return np.array(
+        [[0.7, 0.2, 0.1], [0.1, 0.8, 0.1], [0.2, 0.2, 0.6], [0.3, 0.6, 0.1]],
+        dtype=float,
+    )
+
+
+def _y_true_pred():
+    return [0, 1, 2, 1], [0, 1, 2, 2]
+
+
+def test_evaluate_and_plot_ovr_disabled_pr_multiclass(tmp_path, capsys):
+    y_true, y_pred = _y_true_pred()
+    evaluate_and_plot(
+        y_true=y_true,
+        y_pred=y_pred,
+        train_accs=[0.8, 0.9],
+        val_accs=[0.75, 0.85],
+        train_losses=[0.6, 0.4],
+        val_losses=[0.65, 0.5],
+        y_probs=_mc_probs(),
+        class_names=["A", "B", "C"],
+        out_folder=tmp_path,
+        enable_ovr=False,  # <-- key
+        **_h(),
+    )
+    out = capsys.readouterr().out
+    assert "PR OvR disabled" in out
+
+
+def test_evaluate_and_plot_ovr_disabled_pr_threshold_multiclass(tmp_path, capsys):
+    y_true, y_pred = _y_true_pred()
+    evaluate_and_plot(
+        y_true=y_true,
+        y_pred=y_pred,
+        train_accs=[0.8, 0.9],
+        val_accs=[0.75, 0.85],
+        train_losses=[0.6, 0.4],
+        val_losses=[0.65, 0.5],
+        y_probs=_mc_probs(),
+        class_names=["A", "B", "C"],
+        out_folder=tmp_path,
+        enable_ovr=False,  # <-- key
+        **_h(),
+    )
+    out = capsys.readouterr().out
+    assert "PR-threshold OvR disabled" in out
+
+
+def test_evaluate_and_plot_ovr_disabled_roc_multiclass(tmp_path, capsys):
+    y_true, y_pred = _y_true_pred()
+    evaluate_and_plot(
+        y_true=y_true,
+        y_pred=y_pred,
+        train_accs=[0.8, 0.9],
+        val_accs=[0.75, 0.85],
+        train_losses=[0.6, 0.4],
+        val_losses=[0.65, 0.5],
+        y_probs=_mc_probs(),
+        class_names=["A", "B", "C"],
+        out_folder=tmp_path,
+        enable_ovr=False,  # <-- key
+        **_h(),
+    )
+    out = capsys.readouterr().out
+    assert "ROC OvR disabled" in out

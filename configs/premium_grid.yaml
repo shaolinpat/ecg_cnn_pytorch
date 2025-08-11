@@ -23,6 +23,12 @@ data_dir: null       # Optional override for PTB-XL dataset directory
 sample_dir: null     # Optional override for sample data location
 
 # ------------------------------------------------------------------------------
+# Control Plotting in evaluate.py
+# ------------------------------------------------------------------------------
+plots_enable_ovr: false
+plots_ovr_classes: []
+
+# ------------------------------------------------------------------------------
 # Housekeeping
 # ------------------------------------------------------------------------------
 n_folds: 5           # Number of folds to use for cross-validation (e.g., 5 for 

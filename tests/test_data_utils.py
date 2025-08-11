@@ -551,11 +551,13 @@ def test_load_ptbxl_sample_from_ids_csv(tmp_path):
     dummy_X = np.zeros((1, 12, 1000))
     dummy_y = np.array([1])
 
-    with patch(
-        "ecg_cnn.data.data_utils.build_full_X_y",
-        return_value=(dummy_X, dummy_y, dummy_meta),
-    ), patch("ecg_cnn.data.data_utils.load_ptbxl_meta", return_value=dummy_meta), patch(
-        "wfdb.rdsamp", return_value=(np.zeros((1000, 12)), {})
+    with (
+        patch(
+            "ecg_cnn.data.data_utils.build_full_X_y",
+            return_value=(dummy_X, dummy_y, dummy_meta),
+        ),
+        patch("ecg_cnn.data.data_utils.load_ptbxl_meta", return_value=dummy_meta),
+        patch("wfdb.rdsamp", return_value=(np.zeros((1000, 12)), {})),
     ):
 
         X, y, meta = load_ptbxl_sample(sample_dir, ptb_dir)
@@ -589,11 +591,13 @@ def test_load_ptbxl_sample_from_filename_parsing(tmp_path):
     dummy_X = np.zeros((1, 12, 1000))
     dummy_y = np.array([1])
 
-    with patch(
-        "ecg_cnn.data.data_utils.build_full_X_y",
-        return_value=(dummy_X, dummy_y, dummy_meta),
-    ), patch("ecg_cnn.data.data_utils.load_ptbxl_meta", return_value=dummy_meta), patch(
-        "wfdb.rdsamp", return_value=(np.zeros((1000, 12)), {})
+    with (
+        patch(
+            "ecg_cnn.data.data_utils.build_full_X_y",
+            return_value=(dummy_X, dummy_y, dummy_meta),
+        ),
+        patch("ecg_cnn.data.data_utils.load_ptbxl_meta", return_value=dummy_meta),
+        patch("wfdb.rdsamp", return_value=(np.zeros((1000, 12)), {})),
     ):
 
         X, y, meta = load_ptbxl_sample(sample_dir, ptb_path)
@@ -602,6 +606,107 @@ def test_load_ptbxl_sample_from_filename_parsing(tmp_path):
     assert X.shape == (1, 12, 1000)
     assert y.shape == (1,)
     assert meta.shape[0] == 1
+
+
+def test_load_ptbxl_sample_sample_dir_bad_type_triggers_typeerror():
+    # sample_dir invalid type -> hits the FIRST else (raises TypeError) before anything else
+    with pytest.raises(TypeError, match="sample_dir must be str|Path|None"):
+        load_ptbxl_sample(sample_dir=123, ptb_path=None)
+
+
+def test_load_ptbxl_sample_ptb_path_string_hits_second_if_and_then_notadir(tmp_path):
+    # Make sample_dir valid so we get past it
+    sample_dir = tmp_path / "sample"
+    sample_dir.mkdir()
+    # ptb_path provided as STRING -> hits the SECOND if (Path(...))
+    # It doesn't exist, so after normalization we’ll hit NotADirectoryError,
+    # which is fine—coverage still executes the line we need.
+    with pytest.raises(NotADirectoryError, match="Input not a directory"):
+        load_ptbxl_sample(sample_dir=sample_dir, ptb_path=str(tmp_path / "ptb_dne"))
+
+
+def test_load_ptbxl_sample_ptb_path_bad_type_triggers_typeerror(tmp_path):
+    # Make sample_dir valid so we get past it
+    sample_dir = tmp_path / "sample2"
+    sample_dir.mkdir()
+    # ptb_path invalid type -> hits the SECOND else (raises TypeError)
+    with pytest.raises(TypeError, match="ptb_path must be str|Path|None"):
+        load_ptbxl_sample(sample_dir=sample_dir, ptb_path=[])
+
+
+def test_load_ptbxl_sample_normalizes_ptb_path_none_uses_default(tmp_path, monkeypatch):
+    # Make a valid sample_dir so we get past its checks
+    sample_dir = tmp_path / "sample_ok"
+    sample_dir.mkdir()
+
+    # Patch the default and ensure it exists as a directory
+    patched_default = tmp_path / "ptb"
+    patched_default.mkdir()
+
+    # Force the function to take the "ptb_path is None" branch by monkeypatching the default
+    monkeypatch.setattr(
+        "ecg_cnn.data.data_utils.PTBXL_DATA_DIR",
+        tmp_path / "ptb",
+        raising=True,
+    )
+
+    # It will fail later when expected sample files aren't found, that's fine — coverage still hits the branch.
+    with pytest.raises(
+        FileNotFoundError, match=r"\[Errno 2\] No such file or directory"
+    ):
+        load_ptbxl_sample(sample_dir=sample_dir, ptb_path=None)
+
+
+def test_load_ptbxl_sample_normalizes_ptb_path_string(tmp_path):
+    # Valid sample_dir so we get past its checks
+    sample_dir = tmp_path / "sample_ok2"
+    sample_dir.mkdir()
+
+    # Provide ptb_path as STRING to hit the `elif isinstance(ptb_path, (str, Path))` branch
+    ptb_path_str = str(tmp_path / "ptb_as_str")
+    Path(ptb_path_str).mkdir(parents=True, exist_ok=True)
+
+    # Will fail later due to missing expected files — that’s fine for coverage.
+    with pytest.raises(
+        FileNotFoundError, match=r"\[Errno 2\] No such file or directory"
+    ):
+        load_ptbxl_sample(sample_dir=sample_dir, ptb_path=ptb_path_str)
+
+
+def test_load_ptbxl_sample_rejects_bad_ptb_path_type(tmp_path):
+    # Valid sample_dir so we reach the ptb_path type check
+    sample_dir = tmp_path / "sample_ok3"
+    sample_dir.mkdir()
+
+    # Invalid ptb_path type -> hits the final 'else' and raises TypeError
+    with pytest.raises(TypeError, match="ptb_path must be str|Path|None"):
+        load_ptbxl_sample(sample_dir=sample_dir, ptb_path=[])
+
+
+# ------------------------------------------------------------------------------
+# data_utils: default sample_dir branch
+# ------------------------------------------------------------------------------
+
+
+def test_load_ptbxl_sample_uses_default_sample_dir_when_none(tmp_path, monkeypatch):
+    # Point defaults to tmp so the directory checks pass
+    monkeypatch.setattr("ecg_cnn.data.data_utils.PROJECT_ROOT", tmp_path, raising=True)
+    monkeypatch.setattr(
+        "ecg_cnn.data.data_utils.PTBXL_DATA_DIR", tmp_path / "ptb", raising=True
+    )
+
+    # Create the directories expected by the function
+    (tmp_path / "data" / "sample").mkdir(
+        parents=True, exist_ok=True
+    )  # default sample dir
+    (tmp_path / "ptb").mkdir(parents=True, exist_ok=True)  # default PTB dir
+
+    # We only care that the branch executes; the function will fail later when it
+    # can't find the sample CSVs. That’s fine for coverage.
+    with pytest.raises(FileNotFoundError, match=r"No such file or directory"):
+        from ecg_cnn.data.data_utils import load_ptbxl_sample
+
+        load_ptbxl_sample(sample_dir=None, ptb_path=None)
 
 
 # ------------------------------------------------------------------------------

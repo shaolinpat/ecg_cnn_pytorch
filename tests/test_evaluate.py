@@ -433,3 +433,189 @@ def test_entry_point_runs(monkeypatch, tmp_path):
     assert (
         "Loading config from:" in result.stdout or "FileNotFoundError" in result.stderr
     )
+
+
+@mock.patch("torch.load")
+@mock.patch("ecg_cnn.evaluate.load_ptbxl_full")
+@mock.patch("ecg_cnn.evaluate.MODEL_CLASSES")
+@mock.patch("ecg_cnn.evaluate.load_training_config")
+@mock.patch("ecg_cnn.evaluate.evaluate_and_plot")
+def test_env_overrides_enable_and_classes(
+    mock_eval_plot,
+    mock_load_cfg,
+    mock_models,
+    mock_load_data,
+    mock_torch_load,
+    monkeypatch,
+):
+    # Ensure config glob finds something
+    with mock.patch.object(Path, "glob") as mock_glob:
+        tag = "ECGConvNet_lr001_bs8_wd0"
+        mock_glob.return_value = [evaluate.RESULTS_DIR / f"config_{tag}.yaml"]
+
+        # Env: explicit enable + explicit classes
+        monkeypatch.setenv("ECG_PLOTS_ENABLE_OVR", "1")
+        monkeypatch.setenv("ECG_PLOTS_OVR_CLASSES", "NORM,MI")
+
+        # Keep class space small and deterministic
+        monkeypatch.setattr(
+            "ecg_cnn.evaluate.FIVE_SUPERCLASSES", ["NORM", "MI"], raising=False
+        )
+
+        # Minimal data
+        X = np.random.randn(6, 1, 10).astype(np.float32)
+        y = ["NORM", "MI", "NORM", "MI", "NORM", "MI"]
+        meta = pd.DataFrame({"i": range(len(y))})
+        mock_load_data.return_value = (X, y, meta)
+
+        # Config dict with extras evaluate.py expects
+        mock_load_cfg.return_value = {
+            "model": "ECGConvNet",
+            "lr": 1e-3,
+            "batch_size": 8,
+            "weight_decay": 0.0,
+            "n_epochs": 1,
+            "save_best": False,
+            "sample_only": False,
+            "subsample_frac": 1.0,
+            "sampling_rate": 100,
+            "data_dir": None,
+            "sample_dir": None,
+            "n_folds": 0,
+            "verbose": False,
+            # plotting defaults (optional but fine to keep)
+            "plots_enable_ovr": False,
+            "plots_ovr_classes": [],
+            # the extras that evaluate.py pops into `extra`
+            "tag": tag,
+            "fold": None,
+            "config": f"config_{tag}.yaml",
+        }
+
+        # Tiny model class + instance
+        class TinyModel(torch.nn.Module):
+            def __init__(self, num_classes=2):
+                super().__init__()
+                self.fc = torch.nn.Linear(10, num_classes, bias=False)
+
+            def forward(self, x):
+                n = x.shape[0]
+                return self.fc(x.reshape(n, -1))
+
+        mock_models.__getitem__.return_value = TinyModel
+
+        mock_torch_load.return_value = TinyModel(num_classes=2).state_dict()
+
+        # Summary pointing to a fake model path
+        dummy_summary = [
+            {
+                "fold": None,
+                "loss": 0.1,
+                "model_path": "dummy.pth",
+                "best_epoch": 1,
+                "model": "ECGConvNet",
+            }
+        ]
+        mopen = mock.mock_open(read_data=json.dumps(dummy_summary))
+
+        with mock.patch("builtins.open", mopen), mock.patch.object(builtins, "print"):
+            evaluate.main(fold_override=None)
+
+    # Assert evaluate_and_plot saw the env overrides
+    assert mock_eval_plot.called
+    kwargs = mock_eval_plot.call_args.kwargs
+    assert kwargs["enable_ovr"] is True
+    assert set(kwargs["ovr_classes"]) == {"NORM", "MI"}
+
+
+@mock.patch("torch.load")
+@mock.patch("ecg_cnn.evaluate.load_ptbxl_full")
+@mock.patch("ecg_cnn.evaluate.MODEL_CLASSES")
+@mock.patch("ecg_cnn.evaluate.load_training_config")
+@mock.patch("ecg_cnn.evaluate.evaluate_and_plot")
+def test_env_classes_only_implicitly_enables_all(
+    mock_eval_plot,
+    mock_load_cfg,
+    mock_models,
+    mock_load_data,
+    mock_torch_load,
+    monkeypatch,
+):
+    # Ensure config glob finds something
+    with mock.patch.object(Path, "glob") as mock_glob:
+        tag = "ECGConvNet_lr001_bs8_wd0"
+        mock_glob.return_value = [evaluate.RESULTS_DIR / f"config_{tag}.yaml"]
+
+        # Only classes var set; empty string means "all classes"; no explicit enable var
+        monkeypatch.delenv("ECG_PLOTS_ENABLE_OVR", raising=False)
+        monkeypatch.setenv("ECG_PLOTS_OVR_CLASSES", "")
+
+        # Keep class space small
+        monkeypatch.setattr(
+            "ecg_cnn.evaluate.FIVE_SUPERCLASSES", ["NORM", "MI"], raising=False
+        )
+
+        # Minimal data
+        X = np.random.randn(4, 1, 10).astype(np.float32)
+        y = ["NORM", "MI", "NORM", "MI"]
+        meta = pd.DataFrame({"i": range(len(y))})
+        mock_load_data.return_value = (X, y, meta)
+
+        # Config defaults (OvR disabled in YAML)
+        mock_load_cfg.return_value = {
+            "model": "ECGConvNet",
+            "lr": 1e-3,
+            "batch_size": 8,
+            "weight_decay": 0.0,
+            "n_epochs": 1,
+            "save_best": False,
+            "sample_only": False,
+            "subsample_frac": 1.0,
+            "sampling_rate": 100,
+            "data_dir": None,
+            "sample_dir": None,
+            "n_folds": 0,
+            "verbose": False,
+            # plotting defaults (optional but fine to keep)
+            "plots_enable_ovr": False,
+            "plots_ovr_classes": [],
+            # the extras that evaluate.py pops into `extra`
+            "tag": tag,
+            "fold": None,
+            "config": f"config_{tag}.yaml",
+        }
+
+        # Tiny model class + instance
+        class TinyModel(torch.nn.Module):
+            def __init__(self, num_classes=2):
+                super().__init__()
+                self.fc = torch.nn.Linear(10, num_classes, bias=False)
+
+            def forward(self, x):
+                n = x.shape[0]
+                return self.fc(x.reshape(n, -1))
+
+        mock_models.__getitem__.return_value = TinyModel
+
+        mock_torch_load.return_value = TinyModel(num_classes=2).state_dict()
+
+        # Summary
+        dummy_summary = [
+            {
+                "fold": None,
+                "loss": 0.1,
+                "model_path": "dummy.pth",
+                "best_epoch": 1,
+                "model": "ECGConvNet",
+            }
+        ]
+        mopen = mock.mock_open(read_data=json.dumps(dummy_summary))
+
+        with mock.patch("builtins.open", mopen), mock.patch.object(builtins, "print"):
+            evaluate.main(fold_override=None)
+
+    # Assert implicit enable + no filter (None)
+    assert mock_eval_plot.called
+    kwargs = mock_eval_plot.call_args.kwargs
+    assert kwargs["enable_ovr"] is True
+    assert kwargs["ovr_classes"] is None
