@@ -35,36 +35,60 @@ def is_grid_config(config_dict: Dict[str, Any]) -> bool:
     return any(isinstance(value, list) for value in config_dict.values())
 
 
+# ecg_cnn/utils/grid_utils.py
+from typing import Dict, Any, Generator
+import itertools
+import copy
+
+
 def expand_grid(config_dict: Dict[str, Any]) -> Generator[Dict[str, Any], None, None]:
     """
     Yield individual configurations from a grid config dictionary.
 
+    Contract
+    --------
+    - Keys with LIST values are treated as grid axes (lists must be non-empty).
+    - Tuples or sets are unsupported for grid axes (raise).
+    - All other values are static (passed through).
+    - This function does NOT validate element types; the consumer should.
+
     Parameters
     ----------
     config_dict : dict
-        The original configuration dictionary. Keys with list values are treated as grid axes.
+        The configuration dictionary.
 
     Yields
     ------
     dict
-        A configuration dictionary with one combination of hyperparameters.
+        One configuration per Cartesian combination of grid axes.
     """
     if not isinstance(config_dict, dict):
         raise ValueError(
             f"Expected config_dict to be a dict, got {type(config_dict).__name__}"
         )
 
-    grid_params = {k: v for k, v in config_dict.items() if isinstance(v, list)}
-    static_params = {k: v for k, v in config_dict.items() if not isinstance(v, list)}
+    grid_params: Dict[str, list] = {}
+    static_params: Dict[str, Any] = {}
+
+    for k, v in config_dict.items():
+        if isinstance(v, list):
+            if len(v) == 0:
+                # Tests expect anchored message: r"^Grid list for key 'lr' must be non-empty"
+                raise ValueError(f"Grid list for key '{k}' must be non-empty")
+            grid_params[k] = v
+        elif isinstance(v, (tuple, set)):
+            # Tests expect anchored message: r"^Unsupported iterable type for grid value"
+            raise ValueError("Unsupported iterable type for grid value")
+        else:
+            static_params[k] = v
 
     if not grid_params:
+        # No sweep axes -> yield a deep copy of the input
         yield copy.deepcopy(config_dict)
         return
 
     keys = list(grid_params.keys())
-    values_product = itertools.product(*(grid_params[k] for k in keys))
-
-    for values in values_product:
-        run_config = static_params.copy()
-        run_config.update(dict(zip(keys, values)))
-        yield run_config
+    for values in itertools.product(*(grid_params[k] for k in keys)):
+        run = static_params.copy()
+        run.update(dict(zip(keys, values)))
+        yield run

@@ -1,7 +1,20 @@
+# tests/test_model_utils.py
+
+"""
+Tests for ecg_cnn.models.model_utils.py
+
+Covers
+------
+    - ECGConvNet/ECGResNet/ECGInceptionNet forward and repr behavior
+    - _get_flattened_size() validation paths
+    - InceptionBlock1D and ResidualBlock1D reprs
+    - count_parameters() correctness
+"""
+
 import numpy as np
 import pytest
-import random
 import torch
+
 from ecg_cnn.models.model_utils import (
     ECGConvNet,
     ECGResNet,
@@ -10,12 +23,6 @@ from ecg_cnn.models.model_utils import (
     ResidualBlock1D,
     count_parameters,
 )
-
-
-SEED = 22
-torch.manual_seed(SEED)
-random.seed(SEED)
-np.random.seed(SEED)
 
 
 # ------------------------------------------------------------------------------
@@ -69,31 +76,31 @@ def test_get_flattened_size_custom_input():
 
 def test_get_flattened_size_invalid_in_channels():
     model = ECGConvNet(num_classes=5)
-    with pytest.raises(ValueError, match=f"in_channels must be an int"):
+    with pytest.raises(ValueError, match=r"^in_channels must be an int"):
         model._get_flattened_size(in_channels="twelve", seq_len=800)
 
 
-def test_get_flattened_size_inchannels_loo_low():
+def test_get_flattened_size_inchannels_too_low():
     model = ECGConvNet(num_classes=5)
-    with pytest.raises(ValueError, match=r"in_channels must be an int in \[1, 32\]"):
+    with pytest.raises(ValueError, match=r"^in_channels must be an int in \[1, 32\]"):
         model._get_flattened_size(in_channels=0, seq_len=800)
 
 
-def test_get_flattened_size_inchannels_loo_high():
+def test_get_flattened_size_inchannels_too_high():
     model = ECGConvNet(num_classes=5)
-    with pytest.raises(ValueError, match=r"in_channels must be an int in \[1, 32\]"):
+    with pytest.raises(ValueError, match=r"^in_channels must be an int in \[1, 32\]"):
         model._get_flattened_size(in_channels=33, seq_len=800)
 
 
 def test_get_flattened_size_invalid_seq_len():
     model = ECGConvNet(num_classes=5)
-    with pytest.raises(ValueError, match=f"seq_len must be an int"):
+    with pytest.raises(ValueError, match=r"^seq_len must be an int"):
         model._get_flattened_size(in_channels=12, seq_len="800")
 
 
 def test_get_flattened_size_seq_len_too_low():
     model = ECGConvNet(num_classes=5)
-    with pytest.raises(ValueError, match=f"seq_len must be an int >= 8"):
+    with pytest.raises(ValueError, match=r"^seq_len must be an int >= 8"):
         model._get_flattened_size(in_channels=12, seq_len=7)
 
 
@@ -107,8 +114,6 @@ def test_ecgconvnet_repr():
 # ------------------------------------------------------------------------------
 # ECGResNet
 # ------------------------------------------------------------------------------
-
-
 def test_ecgresnet_forward_shape():
     model = ECGResNet(num_classes=6)
     dummy_input = torch.randn(2, 12, 1000)
@@ -126,8 +131,6 @@ def test_ecgresnet_repr():
 # ------------------------------------------------------------------------------
 # ECGInceptionNet
 # ------------------------------------------------------------------------------
-
-
 def test_ecginceptionnet_forward_shape():
     model = ECGInceptionNet(num_classes=4)
     dummy_input = torch.randn(3, 12, 1000)
@@ -144,10 +147,7 @@ def test_ecginceptionnet_repr():
 
 # ------------------------------------------------------------------------------
 # InceptionBlock1D
-
 # ------------------------------------------------------------------------------
-
-
 def test_inceptionblock1d_repr():
     model = InceptionBlock1D(in_channels=22, out_channels=11)
     r = repr(model)
@@ -158,8 +158,6 @@ def test_inceptionblock1d_repr():
 # ------------------------------------------------------------------------------
 # ResidualBlock1D
 # ------------------------------------------------------------------------------
-
-
 def test_residualblock1d_repr():
     model = ResidualBlock1D(in_channels=22, out_channels=11, kernel_size=4)
     r = repr(model)
@@ -167,21 +165,9 @@ def test_residualblock1d_repr():
     assert "kernel_size=4" in r
 
 
-from ecg_cnn.models.model_utils import count_parameters
-
-
-def test_count_parameters_matches_sum():
-    model = ECGConvNet(num_classes=5)
-    counted = count_parameters(model)
-    manual = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    assert counted == manual
-
-
 # ------------------------------------------------------------------------------
 # count_parameters
 # ------------------------------------------------------------------------------
-
-
 def test_count_parameters_matches_sum():
     model = ECGConvNet(num_classes=5)
     counted = count_parameters(model)

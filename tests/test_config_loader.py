@@ -1,7 +1,22 @@
+# tests/test_config_loader.py
+
+"""
+Tests for ecg_cnn.config.config_loader.
+
+Goals
+-----
+    1) Verify TrainConfig.finalize() normalizes flags and paths.
+    2) Validate load_training_config behavior for valid, invalid, and edge
+       cases.
+    3) Test merge_configs with partial, full, dict-based, and invalid overrides.
+    4) Ensure normalize_path_fields correctly converts string paths to Path
+       objects.
+    5) Verify load_yaml_as_dict handles valid, invalid, and missing files.
+"""
+
 import pytest
 import tempfile
 import yaml
-
 from pathlib import Path
 
 from ecg_cnn.config.config_loader import (
@@ -13,21 +28,21 @@ from ecg_cnn.config.config_loader import (
 )
 
 # ------------------------------------------------------------------------------
-# Helpers
+# Local helpers
 # ------------------------------------------------------------------------------
 
 
 def make_temp_yaml(data: dict) -> Path:
-    """Helper to write a temporary YAML file and return the path."""
+    """Write a temporary YAML file and return its path."""
     tmp = tempfile.NamedTemporaryFile(delete=False, mode="w", suffix=".yaml")
-    yaml.dump(data, tmp)
+    yaml.safe_dump(data, tmp, sort_keys=True)
     tmp.close()
     return Path(tmp.name)
 
 
-# ------------------------------------------------------------------------------
-# def finalize(self) -> "TrainConfig":
-# ------------------------------------------------------------------------------
+# ==============================================================================
+# A. TrainConfig.finalize
+# ==============================================================================
 
 
 def test_finalize_normalizes_flags_and_paths():
@@ -55,9 +70,9 @@ def test_finalize_normalizes_flags_and_paths():
     assert isinstance(cfg.sample_dir, Path)
 
 
-# ------------------------------------------------------------------------------
-# def load_training_config(path: Path | str) -> TrainConfig:
-# ------------------------------------------------------------------------------
+# ==============================================================================
+# B. load_training_config
+# ==============================================================================
 
 
 def test_load_training_config_success():
@@ -85,37 +100,32 @@ def test_load_training_config_success():
 
 
 def test_load_training_config_file_not_found():
-    with pytest.raises(FileNotFoundError, match="Config file not found"):
+    with pytest.raises(FileNotFoundError, match=r"^Config file not found"):
         load_training_config("nonexistent_config.yaml")
 
 
 def test_load_training_config_path_is_directory(tmp_path):
-    with pytest.raises(ValueError, match="Expected a file"):
-        load_training_config(tmp_path)  # tmp_path is a dir
+    with pytest.raises(ValueError, match=r"^Expected a file"):
+        load_training_config(tmp_path)
 
 
-def test_load_training_config_yaml_parse_error():
-    bad_yaml = "{model: ECGConvNet, lr: 0.001,"  # malformed
-    tmp = tempfile.NamedTemporaryFile(delete=False, mode="w", suffix=".yaml")
-    tmp.write(bad_yaml)
-    tmp.close()
-    with pytest.raises(ValueError, match="YAML parse error"):
-        load_training_config(tmp.name)
+def test_load_training_config_yaml_parse_error(tmp_path):
+    # Malformed YAML
+    bad_yaml = tmp_path / "bad.yaml"
+    bad_yaml.write_text("{model: ECGConvNet, lr: 0.001,")
+    with pytest.raises(ValueError, match=r"^YAML parse error"):
+        load_training_config(bad_yaml)
 
 
 def test_load_training_config_missing_fields():
-    incomplete_data = {
-        "model": "ECGConvNet",  # missing other required fields
-    }
-    path = make_temp_yaml(incomplete_data)
-    with pytest.raises(ValueError, match="Invalid config structure or missing fields"):
+    path = make_temp_yaml({"model": "ECGConvNet"})
+    with pytest.raises(
+        ValueError, match=r"^Invalid config structure or missing fields"
+    ):
         load_training_config(path)
 
 
 def test_load_training_config_raises_if_not_dict(tmp_path):
-    """
-    Ensure load_training_config raises ValueError if YAML is not a dict.
-    """
     bad_yaml = tmp_path / "bad.yaml"
     # Write a YAML list instead of a dict
     bad_yaml.write_text(
@@ -124,15 +134,11 @@ def test_load_training_config_raises_if_not_dict(tmp_path):
     - list: of values
     """
     )
-
-    with pytest.raises(ValueError, match=r"Config must be a YAML dictionary"):
+    with pytest.raises(ValueError, match=r"^Config must be a YAML dictionary"):
         load_training_config(bad_yaml)
 
 
 def test_load_training_config_returns_raw_when_not_strict(tmp_path):
-    """
-    Ensure load_training_config returns raw dict when strict=False.
-    """
     raw_config = {
         "model": "ECGConvNet",
         "lr": 0.001,
@@ -147,7 +153,6 @@ def test_load_training_config_returns_raw_when_not_strict(tmp_path):
         "save_best": True,
         "verbose": True,
     }
-
     yaml_path = tmp_path / "config.yaml"
     yaml_path.write_text(
         "\n".join(f"{k}: {v}" for k, v in raw_config.items())
@@ -155,58 +160,85 @@ def test_load_training_config_returns_raw_when_not_strict(tmp_path):
         .replace("True", "true")
         .replace("False", "false")
     )
-
     result = load_training_config(yaml_path, strict=False)
     assert isinstance(result, dict)
     assert result == raw_config
 
 
-# ------------------------------------------------------------------------------
-# def merge_configs(base: TrainConfig, override: TrainConfig | dict)
-#       -> TrainConfig:
-# ------------------------------------------------------------------------------
+# ==============================================================================
+# C. merge_configs
+# ==============================================================================
 
 
-def base_cfg():
-    return TrainConfig(
+def test_merge_configs_partial_override_with_dict(make_train_config):
+    base = make_train_config(
         model="ECGConvNet",
         lr=0.001,
         batch_size=64,
         weight_decay=0.0,
         n_epochs=10,
+        n_folds=1,
         save_best=True,
         sample_only=False,
         subsample_frac=1.0,
         sampling_rate=100,
-        data_dir=None,
-        sample_dir=None,
         verbose=False,
-        n_folds=1,
     )
+    override = {
+        "model": "Base",
+        "lr": 0.01,
+        "batch_size": 128,
+        "n_epochs": 3,
+        "sample_only": True,
+        "subsample_frac": 0.2,
+        "sampling_rate": 500,
+        "data_dir": "data_dir",
+    }
+    merged = merge_configs(base, override)
+    assert merged.lr == 0.01
+    assert merged.subsample_frac == 0.2
+    assert merged.verbose is False
+    assert merged.n_epochs == 3
+    assert merged.n_folds == 1
+    assert merged.weight_decay == 0.0
 
 
-def test_merge_configs_partial_override():
-    override = TrainConfig(
+def test_merge_configs_partial_override_with_trainconfig(make_train_config):
+    base = make_train_config(
+        model="ECGConvNet",
+        lr=0.001,
+        batch_size=64,
+        weight_decay=0.0,
+        n_epochs=10,
+        n_folds=1,
+        save_best=True,
+        sample_only=False,
+        subsample_frac=1.0,
+        sampling_rate=100,
+        verbose=False,
+    )
+    override = make_train_config(
         model="Base",
         lr=0.01,
         batch_size=128,
-        weight_decay=0.0,
         n_epochs=3,
-        save_best=True,
         sample_only=True,
         subsample_frac=0.2,
         sampling_rate=500,
         data_dir="data_dir",
-        sample_dir=None,
     )
-    merged = merge_configs(base_cfg(), override)
+    merged = merge_configs(base, override)
     assert merged.lr == 0.01
     assert merged.subsample_frac == 0.2
-    assert merged.verbose == False
+    assert merged.verbose is False
+    assert merged.n_epochs == 3
+    assert merged.n_folds == 2
+    assert merged.weight_decay == 0.0
 
 
-def test_merge_configs_all_overrides():
-    override = TrainConfig(
+def test_merge_configs_all_overrides(make_train_config):
+    base = make_train_config()
+    override = make_train_config(
         model="AltModel",
         lr=0.005,
         batch_size=128,
@@ -221,125 +253,114 @@ def test_merge_configs_all_overrides():
         verbose=True,
         n_folds=3,
     )
-    merged = merge_configs(base_cfg(), override)
+    merged = merge_configs(base, override)
     assert merged.model == "AltModel"
     assert merged.verbose is True
     assert merged.save_best is False
     assert merged.n_folds == 3
 
 
-def test_merge_configs_raises_on_non_trainconfig_inputs():
-    with pytest.raises(TypeError, match="Expected base to be TrainConfig"):
-        merge_configs({}, base_cfg())
-    with pytest.raises(TypeError, match="Expected override to be TrainConfig"):
-        merge_configs(base_cfg(), "invalid")
+def test_merge_configs_raises_on_non_trainconfig_inputs(make_train_config):
+    base = make_train_config()
+    with pytest.raises(TypeError, match=r"^Expected base to be TrainConfig"):
+        merge_configs({}, base)
+    with pytest.raises(TypeError, match=r"^Expected override to be TrainConfig"):
+        merge_configs(base, "invalid")
 
 
-def test_merge_configs_raises_on_bad_override_type():
-    bad_override = base_cfg()
-    bad_override.lr = "not_a_float"
-    with pytest.raises(ValueError, match="Invalid type for field"):
-        merge_configs(base_cfg(), bad_override)
+def test_merge_configs_raises_on_bad_override_type(make_train_config):
+    base = make_train_config()
+    bad_override = make_train_config()
+    bad_override.lr = "not_a_float"  # type: ignore[assignment]
+    with pytest.raises(ValueError, match=r"^Invalid type for field"):
+        merge_configs(base, bad_override)
 
 
-def test_merge_configs_optional_field_type_dispatch():
-    base = base_cfg()
-    override = base_cfg()
-    override.sample_dir = "foo/bar"  # str to Optional[str|Path]
-
+def test_merge_configs_optional_field_type_dispatch(make_train_config):
+    base = make_train_config()
+    override = make_train_config()
+    override.sample_dir = "foo/bar"
     merged = merge_configs(base, override)
-    assert merged.sample_dir == "foo/bar" or str(merged.sample_dir) == "foo/bar"
+    assert str(merged.sample_dir) == "foo/bar"
 
 
-def test_merge_configs_optional_field_with_invalid_type():
-    base = base_cfg()
-    override = base_cfg()
-    override.sample_dir = 12345  # not str or Path
-
-    with pytest.raises(ValueError, match="Invalid type for field 'sample_dir'"):
+def test_merge_configs_optional_field_with_invalid_type(make_train_config):
+    base = make_train_config()
+    override = make_train_config()
+    override.sample_dir = 12345
+    with pytest.raises(ValueError, match=r"^Invalid type for field 'sample_dir'"):
         merge_configs(base, override)
 
 
-def test_merge_configs_union_field_with_str_triggers_get_args():
-    base = base_cfg()
-    override = base_cfg()
-    override.sample_dir = "some/path"  # str into Optional[Union[str, Path]]
-
+def test_merge_configs_union_field_with_str_triggers_get_args(make_train_config):
+    base = make_train_config()
+    override = make_train_config()
+    override.sample_dir = "some/path"
     merged = merge_configs(base, override)
     merged = normalize_path_fields(merged)
-
-    # Should coerce successfully
     assert isinstance(merged.sample_dir, Path)
     assert merged.sample_dir == Path("some/path")
 
 
-def test_merge_configs_union_field_with_invalid_type_triggers_get_args():
-    base = base_cfg()
-    override = base_cfg()
-    override.sample_dir = 999  # not str, not Path
-
-    with pytest.raises(ValueError, match="Invalid type for field 'sample_dir'"):
+def test_merge_configs_union_field_with_invalid_type_triggers_get_args(
+    make_train_config,
+):
+    base = make_train_config()
+    override = make_train_config()
+    override.sample_dir = 999
+    with pytest.raises(ValueError, match=r"^Invalid type for field 'sample_dir'"):
         merge_configs(base, override)
 
 
-def test_merge_configs_union_field_accepts_path_and_hits_get_args():
-    base = base_cfg()
-    override = base_cfg()
+def test_merge_configs_union_field_accepts_path_and_hits_get_args(make_train_config):
+    base = make_train_config()
+    override = make_train_config()
     override.sample_dir = Path("foo/bar")
-
-    # Triggers fallback to get_args(), covering:
-    # accepted_types = tuple(t for t in get_args(expected_type) if t is not type(None))
     merged = merge_configs(base, override)
-
     assert merged.sample_dir == Path("foo/bar")
     assert isinstance(merged.sample_dir, Path)
 
 
-def test_merge_configs_accepts_dict_override():
-    """
-    Ensure merge_configs works when the override is a plain dictionary.
-    """
-    base = load_training_config("configs/baseline.yaml", strict=True)
-    override = {
-        "model": "ECGConvNetV2",
-        "lr": 0.0005,
-        "verbose": True,
-    }
-
+def test_merge_configs_accepts_dict_override(make_train_config):
+    base = make_train_config()
+    override = {"model": "ECGConvNetV2", "lr": 0.0005, "verbose": True}
     result = merge_configs(base, override)
     assert result.model == "ECGConvNetV2"
     assert result.lr == 0.0005
     assert result.verbose is True
 
 
-# ------------------------------------------------------------------------------
-# def normalize_path_fields(cfg: TrainConfig) -> TrainConfig:
-# ------------------------------------------------------------------------------
+# ==============================================================================
+# D. normalize_path_fields
+# ==============================================================================
 
 
-def test_normalize_path_fields_converts_data_dir_str_to_path():
-    cfg = base_cfg()
+def test_normalize_path_fields_converts_data_dir_str_to_path(make_train_config):
+    cfg = make_train_config()
     cfg.data_dir = "some/data/path"
-
     normalized = normalize_path_fields(cfg)
-
     assert isinstance(normalized.data_dir, Path)
     assert normalized.data_dir == Path("some/data/path")
 
 
-def test_normalize_path_fields_converts_sample_dir_str_to_path():
-    cfg = base_cfg()
+def test_normalize_path_fields_converts_sample_dir_str_to_path(make_train_config):
+    cfg = make_train_config()
     cfg.sample_dir = "some/sample/path"
-
     normalized = normalize_path_fields(cfg)
-
     assert isinstance(normalized.sample_dir, Path)
     assert normalized.sample_dir == Path("some/sample/path")
 
 
-# ------------------------------------------------------------------------------
-# def load_yaml_as_dict(path: Path) -> dict
-# ------------------------------------------------------------------------------
+def test_normalize_path_fields_leaves_none_untouched(make_train_config):
+    cfg = make_train_config(data_dir=None, sample_dir=None)
+    normalized = normalize_path_fields(cfg)
+    assert normalized.data_dir is None
+    assert normalized.sample_dir is None
+
+
+# ==============================================================================
+# E. load_yaml_as_dict
+# ==============================================================================
 
 
 def test_load_yaml_as_dict_valid(tmp_path):
@@ -359,14 +380,10 @@ def test_load_yaml_as_dict_file_not_found():
 def test_load_yaml_as_dict_invalid_yaml(tmp_path):
     path = tmp_path / "bad.yaml"
     path.write_text("this: is: not: valid: yaml")
-    with pytest.raises(ValueError, match="YAML parse error"):
+    with pytest.raises(ValueError, match=r"^YAML parse error"):
         load_yaml_as_dict(path)
 
 
 def test_load_yaml_as_dict_not_file(tmp_path):
-    """
-    Ensure load_training_config raises ValueError when given a directory path instead of a file.
-    """
-    # tmp_path is a Path object pointing to a temporary directory
-    with pytest.raises(ValueError, match="Expected a file, got:"):
+    with pytest.raises(ValueError, match=r"^Expected a file, got:"):
         load_yaml_as_dict(tmp_path)

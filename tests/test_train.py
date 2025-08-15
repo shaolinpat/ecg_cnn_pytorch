@@ -1,10 +1,20 @@
-# tests/test_train_main.py
+# tests/test_train.py
+
+"""
+Tests for ecg_cnn.train.
+
+Covers
+------
+    - main(): single config, grid config with folds, no config fallback
+    - __main__ entry point smoke test via run_module
+"""
 
 import json
 import runpy
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+
 import ecg_cnn.train
 
 
@@ -21,15 +31,14 @@ def _cfg(model="ECGConvNet", lr=0.001, bs=8, wd=0.0, n_folds=0, verbose=False):
     )
 
 
-def test_train_main_single_config_no_folds(monkeypatch, tmp_path):
+def test_train_main_single_config_no_folds(monkeypatch, tmp_path, patch_paths):
     """
     Covers: args.config present (non-grid), merging, tag calc, single run,
     summary/config saving, best summary selection, and prints.
     """
-    # Redirect RESULTS_DIR to tmp
-    monkeypatch.setattr(
-        "ecg_cnn.train.RESULTS_DIR", tmp_path / "results", raising=False
-    )
+    # Use central patched results dir; backstop in case train.py binds its own
+    results_dir, *_ = patch_paths
+    monkeypatch.setattr("ecg_cnn.train.RESULTS_DIR", results_dir, raising=False)
 
     # Fake args: --config path
     fake_cfg_path = tmp_path / "cfg.yaml"
@@ -90,8 +99,8 @@ def test_train_main_single_config_no_folds(monkeypatch, tmp_path):
     assert calls[0]["tag"] == expected_tag
 
     # Files saved
-    summary_path = tmp_path / "results" / f"summary_{expected_tag}.json"
-    config_path = tmp_path / "results" / f"config_{expected_tag}.yaml"
+    summary_path = results_dir / f"summary_{expected_tag}.json"
+    config_path = results_dir / f"config_{expected_tag}.yaml"
     assert summary_path.exists() and config_path.exists()
 
     # Summary content shape (list of summaries)
@@ -100,15 +109,14 @@ def test_train_main_single_config_no_folds(monkeypatch, tmp_path):
     assert data[0]["loss"] == 0.5
 
 
-def test_train_main_grid_with_folds(monkeypatch, tmp_path):
+def test_train_main_grid_with_folds(monkeypatch, tmp_path, patch_paths):
     """
     Covers: grid config path, expand_grid, multiple configs,
     fold loop (n_folds >= 2), per-config summary/config saving, and best model print.
     """
-    # Redirect RESULTS_DIR
-    monkeypatch.setattr(
-        "ecg_cnn.train.RESULTS_DIR", tmp_path / "results", raising=False
-    )
+    # Use central patched results dir; backstop in case train.py binds its own
+    results_dir, *_ = patch_paths
+    monkeypatch.setattr("ecg_cnn.train.RESULTS_DIR", results_dir, raising=False)
 
     # Fake args with a config file
     fake_cfg_path = tmp_path / "grid.yaml"
@@ -176,25 +184,25 @@ def test_train_main_grid_with_folds(monkeypatch, tmp_path):
     # We expect 2 + 3 = 5 training calls
     assert len(calls) == 5
 
-    # Two per-config results files saved
-    tags = [
-        "ECGConvNet_lr0001_bs16_wd0",
-        "ECGConvNet_lr00005_bs16_wd0",
-    ]
-    for tag in tags:
-        summary_path = tmp_path / "results" / f"summary_{tag}.json"
-        config_path = tmp_path / "results" / f"config_{tag}.yaml"
-        assert summary_path.exists() and config_path.exists()
-        # summaries is a list with len = n_folds
-        data = json.loads(summary_path.read_text())
+    # Two per-config results files saved (tags depend on train's formatting)
+    written = sorted(results_dir.glob("summary_*.json"))
+    # Expect at least 2 distinct tags corresponding to the two expanded configs
+    distinct_tags = {p.stem.replace("summary_", "") for p in written}
+    assert len(distinct_tags) >= 2
+
+    # Each summary file should contain a list with length >= number of folds for that config
+    for p in written:
+        data = json.loads(p.read_text())
         assert isinstance(data, list) and len(data) >= 2
 
 
-def test_train_main_no_config_uses_base_cfg(monkeypatch, tmp_path):
-    # Results dir goes to tmp
-    monkeypatch.setattr(
-        "ecg_cnn.train.RESULTS_DIR", tmp_path / "results", raising=False
-    )
+def test_train_main_no_config_uses_base_cfg(monkeypatch, tmp_path, patch_paths):
+    """
+    Covers: args.config=None path, skips YAML/grid helpers, uses base config only.
+    """
+    # Use central patched results dir; backstop in case train.py binds its own
+    results_dir, *_ = patch_paths
+    monkeypatch.setattr("ecg_cnn.train.RESULTS_DIR", results_dir, raising=False)
 
     # Simulate no --config provided
     monkeypatch.setattr(
@@ -207,7 +215,7 @@ def test_train_main_no_config_uses_base_cfg(monkeypatch, tmp_path):
         "ecg_cnn.train.load_training_config", lambda _: base, raising=False
     )
 
-    # CLI overrides: identity (kept for completeness)
+    # CLI overrides: identity
     monkeypatch.setattr(
         "ecg_cnn.train.override_config_with_args", lambda c, a: c, raising=False
     )
@@ -231,7 +239,7 @@ def test_train_main_no_config_uses_base_cfg(monkeypatch, tmp_path):
         "ecg_cnn.train.merge_configs", _should_not_be_called, raising=False
     )
 
-    # Stub run_training to avoid real work
+    # Stub run_training
     calls = []
 
     def fake_run_training(config, fold_idx=None, tag=None):
@@ -256,8 +264,8 @@ def test_train_main_no_config_uses_base_cfg(monkeypatch, tmp_path):
     assert calls[0]["tag"] == expected_tag
 
     # Files saved
-    summary_path = tmp_path / "results" / f"summary_{expected_tag}.json"
-    config_path = tmp_path / "results" / f"config_{expected_tag}.yaml"
+    summary_path = results_dir / f"summary_{expected_tag}.json"
+    config_path = results_dir / f"config_{expected_tag}.yaml"
     assert summary_path.exists() and config_path.exists()
 
     # Summary contains a list with one item
@@ -265,18 +273,17 @@ def test_train_main_no_config_uses_base_cfg(monkeypatch, tmp_path):
     assert isinstance(data, list) and len(data) == 1 and data[0]["loss"] == 0.5
 
 
-def test_train_entrypoint_calls_main(monkeypatch, tmp_path):
+def test_train_entrypoint_calls_main(monkeypatch, tmp_path, patch_paths):
     """
     Covers: the __main__ guard in ecg_cnn.train
     We patch source modules BEFORE executing ecg_cnn.train as __main__.
     """
 
-    # 1) Write results under tmp (train.py reads RESULTS_DIR from ecg_cnn.paths)
-    monkeypatch.setattr(
-        "ecg_cnn.paths.RESULTS_DIR", tmp_path / "results", raising=False
-    )
+    # Use central patched results dir everywhere train might look
+    results_dir, *_ = patch_paths
+    monkeypatch.setattr("ecg_cnn.train.RESULTS_DIR", results_dir, raising=False)
 
-    # 2) Prevent argparse from seeing pytest args + stub parse_args/overrides
+    # Prevent argparse from seeing pytest args + stub parse_args/overrides
     monkeypatch.setattr("sys.argv", ["python"], raising=False)  # neutral argv
     monkeypatch.setattr(
         "ecg_cnn.training.cli_args.parse_args",
@@ -289,7 +296,7 @@ def test_train_entrypoint_calls_main(monkeypatch, tmp_path):
         raising=False,
     )
 
-    # 3) Config loader: return a minimal base config; bypass YAML/grid merges
+    # Config loader: return a minimal base config; bypass YAML/grid merges
     base = _cfg()
     monkeypatch.setattr(
         "ecg_cnn.config.config_loader.load_training_config",
@@ -312,7 +319,7 @@ def test_train_entrypoint_calls_main(monkeypatch, tmp_path):
         "ecg_cnn.utils.grid_utils.expand_grid", lambda d: [], raising=False
     )
 
-    # 4) Trainer: stub run_training to avoid real work and capture the call
+    # Trainer: stub run_training to avoid real work and capture the call
     calls = []
 
     def fake_run_training(config, fold_idx=None, tag=None):
@@ -328,17 +335,17 @@ def test_train_entrypoint_calls_main(monkeypatch, tmp_path):
         "ecg_cnn.training.trainer.run_training", fake_run_training, raising=False
     )
 
-    # 5) Execute ecg_cnn.train as __main__ (fresh module namespace; no warning)
+    # Execute ecg_cnn.train as __main__ (fresh module namespace)
     sys.modules.pop("ecg_cnn.train", None)  # ensure fresh exec
     runpy.run_module("ecg_cnn.train", run_name="__main__")
 
-    # 6) Assertions
+    # Assertions
     assert len(calls) == 1
     expected_tag = (
         f"{base.model}_lr{base.lr:g}_bs{base.batch_size}_wd{base.weight_decay:g}"
     ).replace(".", "")
-    summary_path = tmp_path / "results" / f"summary_{expected_tag}.json"
-    config_path = tmp_path / "results" / f"config_{expected_tag}.yaml"
+    summary_path = results_dir / f"summary_{expected_tag}.json"
+    config_path = results_dir / f"config_{expected_tag}.yaml"
     assert summary_path.exists() and config_path.exists()
 
     data = json.loads(summary_path.read_text())

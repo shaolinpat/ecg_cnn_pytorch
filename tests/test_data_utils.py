@@ -1,9 +1,28 @@
+# tests/test_data_utils.py
+
+"""
+Tests for ecg_cnn.data.data_utils.
+
+Covers
+------
+    - build_full_X_y(): path validation, minimal smoke, and error paths
+    - PTBXLFullDataset: __init__/__len__/__getitem__ end-to-end
+    - select_primary_label(): prioritization and input validation
+    - aggregate_diagnostic(): input validation and restrict behavior
+    - load_ptbxl_meta(): file presence, parsing, and happy path
+    - load_ptbxl_sample(): path normalization, branch coverage, and errors
+    - load_ptbxl_full(): parameter validation and data loading branches
+    - raw_to_five_class(): string/dict parsing and mapping to 5-class labels
+"""
+
 import numpy as np
 import os
 import pandas as pd
 import pytest
-import torch
-import wfdb
+
+# Ensure optional deps cleanly skip if missing (no hard fail during import)
+wfdb = pytest.importorskip("wfdb", reason="wfdb not installed")
+torch = pytest.importorskip("torch", reason="torch not installed")
 
 from pathlib import Path
 from unittest.mock import patch
@@ -16,6 +35,7 @@ from ecg_cnn.data.data_utils import (
     load_ptbxl_sample,
     load_ptbxl_full,
     raw_to_five_class,
+    LABEL2IDX,
 )
 
 
@@ -25,7 +45,13 @@ from ecg_cnn.data.data_utils import (
 
 
 def write_mock_ptb_record(dir_path, ecg_id):
-    """Creates fake WFDB record files for given ecg_id."""
+    """Create fake WFDB record files for a given ecg_id under dir_path.
+
+    Returns
+    -------
+    str
+        Relative WFDB path without extension, e.g. '10000/10001_lr'.
+    """
     record_dir = os.path.join(dir_path, f"{ecg_id // 1000 * 1000:05d}")
     os.makedirs(record_dir, exist_ok=True)
 
@@ -82,7 +108,7 @@ def test_build_full_X_y_missing_meta_csv(tmp_path):
     ptb_dir = tmp_path / "ptb"
     ptb_dir.mkdir(parents=True)
 
-    with pytest.raises(FileNotFoundError, match="Metadata CSV not found"):
+    with pytest.raises(FileNotFoundError, match=r"^Metadata CSV not found"):
         build_full_X_y(str(meta), str(scp), str(ptb_dir))
 
 
@@ -96,7 +122,7 @@ def test_build_full_X_y_missing_scp_csv(tmp_path):
     ptb_dir = tmp_path / "ptb"
     ptb_dir.mkdir(parents=True)
 
-    with pytest.raises(FileNotFoundError, match="SCP statements CSV not found"):
+    with pytest.raises(FileNotFoundError, match=r"^SCP statements CSV not found"):
         build_full_X_y(str(meta), str(scp), str(ptb_dir))
 
 
@@ -111,11 +137,11 @@ def test_build_full_X_y_missing_ptb_path(tmp_path):
 
     bad_dir = tmp_path / "nonexistent" / "dir"
 
-    with pytest.raises(NotADirectoryError, match="PTB-XL root directory not found"):
+    with pytest.raises(NotADirectoryError, match=r"^PTB-XL root directory not found"):
         build_full_X_y(meta, scp, bad_dir)
 
 
-def test_build_full_X_y_smoke(tmp_path):
+def test_build_full_X_y_smoke(tmp_path, patch_paths):
     # Create minimal meta CSV
     meta = tmp_path / "meta.csv"
     meta.write_text(
@@ -127,10 +153,13 @@ def test_build_full_X_y_smoke(tmp_path):
     scp = tmp_path / "scp.csv"
     scp.write_text("dummy,desc\n")
 
-    # Use real PTB-XL data dir if available (or copy one real file into tmp_path)
-    ptb_dir = Path("data/ptbxl/physionet.org/files/ptb-xl/1.0.3")  # adjust if needed
-    if not ptb_dir.exists():
-        pytest.skip("PTB-XL data directory not found")
+    # Use fixture-patched PTB-XL root; skip if sample record files are absent
+    _, _, _, _, _, ptb_dir = patch_paths
+    rel = Path("records100/10000/10001_lr")
+    hea = ptb_dir / f"{rel}.hea"
+    dat = ptb_dir / f"{rel}.dat"
+    if not (hea.exists() and dat.exists()):
+        pytest.skip("Required PTB-XL sample record files not found in PTBXL_DATA_DIR")
 
     X, y, meta_kept = build_full_X_y(meta, scp, ptb_dir)
 
@@ -158,7 +187,7 @@ def test_valid_record_is_loaded(mock_rdsamp, tmp_path):
 
     # Assert
     assert X.shape == (1, 12, 1000)
-    assert y[0] == 3  # assuming LABEL2IDX['NORM'] == 3
+    assert y[0] == LABEL2IDX["NORM"]
 
 
 def test_build_full_X_y_minimal_valid_record(tmp_path):
@@ -215,7 +244,7 @@ def test_build_full_X_y_skips_invalid_scp_codes(tmp_path):
     scp_csv = tmp_path / "scp.csv"
     scp_df.to_csv(scp_csv)
 
-    with pytest.raises(ValueError, match="No valid records"):
+    with pytest.raises(ValueError, match=r"^No valid records"):
         build_full_X_y(meta_csv, scp_csv, ptb_dir)
 
 
@@ -243,11 +272,11 @@ def test_build_full_X_y_skips_unreadable_record(tmp_path):
     scp_csv = tmp_path / "scp.csv"
     scp_df.to_csv(scp_csv)
 
-    with pytest.raises(ValueError, match="No valid records"):
+    with pytest.raises(ValueError, match=r"^No valid records"):
         build_full_X_y(meta_csv, scp_csv, ptb_dir)
 
 
-def test_build_full_X_y_missing_filename_lr(tmp_path):
+def test_build_full_X_y_empty_filename_lr(tmp_path):
     """Should skip rows with missing filename_lr (empty)."""
     ptb_dir = tmp_path / "ptbxl"
     ptb_dir.mkdir(parents=True)
@@ -258,11 +287,12 @@ def test_build_full_X_y_missing_filename_lr(tmp_path):
     scp_csv = tmp_path / "scp.csv"
     scp_csv.write_text("code,description\nNORM,Normal\n")
 
-    with pytest.raises(ValueError, match="No valid records were loaded"):
+    with pytest.raises(ValueError, match=r"^No valid records were loaded"):
         build_full_X_y(meta_csv, scp_csv, ptb_dir)
 
 
 def test_build_full_X_y_missing_filename_lr(tmp_path):
+    """Should raise when 'filename_lr' is absent."""
     ecg_id = 12345
     ptb_dir = tmp_path / "ptbxl"
     ptb_dir.mkdir(parents=True)
@@ -278,7 +308,7 @@ def test_build_full_X_y_missing_filename_lr(tmp_path):
     scp_csv = tmp_path / "scp.csv"
     scp_df.to_csv(scp_csv)
 
-    with pytest.raises(ValueError, match="No valid records"):
+    with pytest.raises(ValueError, match=r"^No valid records"):
         build_full_X_y(meta_csv, scp_csv, ptb_dir)
 
 
@@ -386,12 +416,12 @@ def test_select_primary_label_tuple_input():
 
 
 def test_select_primary_label_type_error_on_non_iterable():
-    with pytest.raises(TypeError, match="label_list must be a list, set, or tuple"):
+    with pytest.raises(TypeError, match=r"^label_list must be a list, set, or tuple"):
         select_primary_label("MI")  # not a list-like structure
 
 
 def test_select_primary_label_type_error_on_non_string_elements():
-    with pytest.raises(TypeError, match="All elements in label_list must be strings"):
+    with pytest.raises(TypeError, match=r"^All elements in label_list must be strings"):
         select_primary_label(["MI", 123])
 
 
@@ -402,12 +432,12 @@ def test_select_primary_label_type_error_on_non_string_elements():
 
 def test_aggregate_diagnostic_codes_not_a_dictionary():
     dummy_df = pd.DataFrame(columns=["scp_code", "diagnostic", "diagnostic_class"])
-    with pytest.raises(ValueError, match="must be a dictionary"):
+    with pytest.raises(ValueError, match=r"^codes must be a dictionary"):
         aggregate_diagnostic('{"NORM": 1.0, "MI": 0.0}', "not_a_df", restrict=True)
 
 
 def test_aggregate_diagnostic_not_dataframe():
-    with pytest.raises(ValueError, match="must be a pandas DataFrame"):
+    with pytest.raises(ValueError, match=r"^agg_df must be a pandas DataFrame"):
         aggregate_diagnostic({"NORM": 1.0, "MI": 0.0}, "not_a_df")
 
 
@@ -423,7 +453,7 @@ def test_aggregate_diagnostic_unknown_code():
     assert result == ["Unknown"]
 
 
-def test_aggregate_diagnostic_restrict_false_unnusual_code():
+def test_aggregate_diagnostic_restrict_false_unusual_code():
     dummy_df = pd.DataFrame(
         {
             "scp_code": ["FAKE"],
@@ -442,7 +472,7 @@ def test_aggregate_diagnostic_restrict_false_unnusual_code():
 
 def test_load_ptbxl_meta_input_not_a_directory(tmp_path):
     bad_dir = tmp_path / "nonexistent" / "dir"
-    with pytest.raises(NotADirectoryError, match="Input not a directory"):
+    with pytest.raises(NotADirectoryError, match=r"^Input not a directory"):
         load_ptbxl_meta(bad_dir)
 
 
@@ -450,7 +480,7 @@ def test_load_ptbxl_meta_missing_ptbxl_database_csv(tmp_path):
     # Create valid directory but no ptbxl_database.csv file
     tmp_path.mkdir(parents=True, exist_ok=True)
     (tmp_path / "scp_statements.csv").write_text("diagnostic\n1")  # dummy content
-    with pytest.raises(FileNotFoundError, match="No such file or directory"):
+    with pytest.raises(FileNotFoundError, match=r"No such file or directory"):
         load_ptbxl_meta(tmp_path)
 
 
@@ -459,7 +489,7 @@ def test_load_ptbxl_meta_missing_scp_statements_csv(tmp_path):
     (tmp_path / "ptbxl_database.csv").write_text(
         "ecg_id,scp_codes\n1000,\"{'NORM': 1}\""
     )
-    with pytest.raises(FileNotFoundError, match="No such file or directory"):
+    with pytest.raises(FileNotFoundError, match=r"No such file or directory"):
         load_ptbxl_meta(tmp_path)
 
 
@@ -503,7 +533,7 @@ def test_load_ptbxl_meta_invalid_scp_codes_format(tmp_path):
     (tmp_path / "ptbxl_database.csv").write_text('ecg_id,scp_codes\n1002,"not_a_dict"')
     (tmp_path / "scp_statements.csv").write_text("diagnostic\n1")
 
-    with pytest.raises(ValueError, match="malformed node or string"):
+    with pytest.raises(ValueError, match=r"^malformed node or string"):
         load_ptbxl_meta(tmp_path)
 
 
@@ -516,15 +546,15 @@ def test_load_ptbxl_sample_input_not_a_directory(tmp_path):
     bad_dir = tmp_path / "nonexistent" / "dir"
     ptb_path = tmp_path / "samples"
     ptb_path.mkdir(parents=True)
-    with pytest.raises(NotADirectoryError, match="Input not a directory"):
+    with pytest.raises(NotADirectoryError, match=r"^Input not a directory"):
         load_ptbxl_sample(bad_dir, ptb_path)
 
 
-def test_load_ptbxl_sample_pbt_path_not_a_directory(tmp_path):
+def test_load_ptbxl_sample_ptb_path_not_a_directory(tmp_path):
     bad_dir = tmp_path / "nonexistent" / "dir"
     sample_dir = tmp_path / "samples"
     sample_dir.mkdir(parents=True)
-    with pytest.raises(NotADirectoryError, match="Input not a directory"):
+    with pytest.raises(NotADirectoryError, match=r"^Input not a directory"):
         load_ptbxl_sample(sample_dir, bad_dir)
 
 
@@ -610,7 +640,7 @@ def test_load_ptbxl_sample_from_filename_parsing(tmp_path):
 
 def test_load_ptbxl_sample_sample_dir_bad_type_triggers_typeerror():
     # sample_dir invalid type -> hits the FIRST else (raises TypeError) before anything else
-    with pytest.raises(TypeError, match="sample_dir must be str|Path|None"):
+    with pytest.raises(TypeError, match=r"^sample_dir must be str\|Path\|None"):
         load_ptbxl_sample(sample_dir=123, ptb_path=None)
 
 
@@ -621,40 +651,8 @@ def test_load_ptbxl_sample_ptb_path_string_hits_second_if_and_then_notadir(tmp_p
     # ptb_path provided as STRING -> hits the SECOND if (Path(...))
     # It doesn't exist, so after normalization we’ll hit NotADirectoryError,
     # which is fine—coverage still executes the line we need.
-    with pytest.raises(NotADirectoryError, match="Input not a directory"):
+    with pytest.raises(NotADirectoryError, match=r"^Input not a directory"):
         load_ptbxl_sample(sample_dir=sample_dir, ptb_path=str(tmp_path / "ptb_dne"))
-
-
-def test_load_ptbxl_sample_ptb_path_bad_type_triggers_typeerror(tmp_path):
-    # Make sample_dir valid so we get past it
-    sample_dir = tmp_path / "sample2"
-    sample_dir.mkdir()
-    # ptb_path invalid type -> hits the SECOND else (raises TypeError)
-    with pytest.raises(TypeError, match="ptb_path must be str|Path|None"):
-        load_ptbxl_sample(sample_dir=sample_dir, ptb_path=[])
-
-
-def test_load_ptbxl_sample_normalizes_ptb_path_none_uses_default(tmp_path, monkeypatch):
-    # Make a valid sample_dir so we get past its checks
-    sample_dir = tmp_path / "sample_ok"
-    sample_dir.mkdir()
-
-    # Patch the default and ensure it exists as a directory
-    patched_default = tmp_path / "ptb"
-    patched_default.mkdir()
-
-    # Force the function to take the "ptb_path is None" branch by monkeypatching the default
-    monkeypatch.setattr(
-        "ecg_cnn.data.data_utils.PTBXL_DATA_DIR",
-        tmp_path / "ptb",
-        raising=True,
-    )
-
-    # It will fail later when expected sample files aren't found, that's fine — coverage still hits the branch.
-    with pytest.raises(
-        FileNotFoundError, match=r"\[Errno 2\] No such file or directory"
-    ):
-        load_ptbxl_sample(sample_dir=sample_dir, ptb_path=None)
 
 
 def test_load_ptbxl_sample_normalizes_ptb_path_string(tmp_path):
@@ -668,9 +666,21 @@ def test_load_ptbxl_sample_normalizes_ptb_path_string(tmp_path):
 
     # Will fail later due to missing expected files — that’s fine for coverage.
     with pytest.raises(
-        FileNotFoundError, match=r"\[Errno 2\] No such file or directory"
+        FileNotFoundError, match=r"^\[Errno 2\] No such file or directory"
     ):
         load_ptbxl_sample(sample_dir=sample_dir, ptb_path=ptb_path_str)
+
+
+def test_load_ptbxl_sample_uses_default_sample_dir_when_none(tmp_path, patch_paths):
+    # Ensure the default sample directory exists
+    (tmp_path / "data" / "sample").mkdir(parents=True, exist_ok=True)
+    # Ensure default PTB dir exists as directory
+    (tmp_path / "ptbxl").mkdir(parents=True, exist_ok=True)
+
+    # We only care that the branch executes; the function will fail later when it
+    # can't find the sample CSVs. That’s fine for coverage.
+    with pytest.raises(FileNotFoundError, match=r"No such file or directory"):
+        load_ptbxl_sample(sample_dir=None, ptb_path=None)
 
 
 def test_load_ptbxl_sample_rejects_bad_ptb_path_type(tmp_path):
@@ -679,34 +689,8 @@ def test_load_ptbxl_sample_rejects_bad_ptb_path_type(tmp_path):
     sample_dir.mkdir()
 
     # Invalid ptb_path type -> hits the final 'else' and raises TypeError
-    with pytest.raises(TypeError, match="ptb_path must be str|Path|None"):
+    with pytest.raises(TypeError, match=r"^ptb_path must be str\|Path\|None"):
         load_ptbxl_sample(sample_dir=sample_dir, ptb_path=[])
-
-
-# ------------------------------------------------------------------------------
-# data_utils: default sample_dir branch
-# ------------------------------------------------------------------------------
-
-
-def test_load_ptbxl_sample_uses_default_sample_dir_when_none(tmp_path, monkeypatch):
-    # Point defaults to tmp so the directory checks pass
-    monkeypatch.setattr("ecg_cnn.data.data_utils.PROJECT_ROOT", tmp_path, raising=True)
-    monkeypatch.setattr(
-        "ecg_cnn.data.data_utils.PTBXL_DATA_DIR", tmp_path / "ptb", raising=True
-    )
-
-    # Create the directories expected by the function
-    (tmp_path / "data" / "sample").mkdir(
-        parents=True, exist_ok=True
-    )  # default sample dir
-    (tmp_path / "ptb").mkdir(parents=True, exist_ok=True)  # default PTB dir
-
-    # We only care that the branch executes; the function will fail later when it
-    # can't find the sample CSVs. That’s fine for coverage.
-    with pytest.raises(FileNotFoundError, match=r"No such file or directory"):
-        from ecg_cnn.data.data_utils import load_ptbxl_sample
-
-        load_ptbxl_sample(sample_dir=None, ptb_path=None)
 
 
 # ------------------------------------------------------------------------------
@@ -716,7 +700,7 @@ def test_load_ptbxl_full_data_dir_not_a_directory(tmp_path):
     bad_dir = tmp_path / "nonexistent" / "dir"
     subsample_frac = 0.5
     sampling_rate = 100
-    with pytest.raises(NotADirectoryError, match="Invalid data directory"):
+    with pytest.raises(NotADirectoryError, match=r"^Invalid data directory"):
         load_ptbxl_full(bad_dir, subsample_frac, sampling_rate)
 
 
@@ -725,7 +709,7 @@ def test_load_ptbxl_full_sample_frac_zero(tmp_path):
     data_dir.mkdir(parents=True)
     subsample_frac = 0.0
     sampling_rate = 100
-    with pytest.raises(ValueError, match=r"subsample_frac must be in \(0\.0, 1\.0\]"):
+    with pytest.raises(ValueError, match=r"^subsample_frac must be in \(0\.0, 1\.0\]"):
         load_ptbxl_full(data_dir, subsample_frac, sampling_rate)
 
 
@@ -734,7 +718,7 @@ def test_load_ptbxl_full_sample_frac_over_one(tmp_path):
     data_dir.mkdir(parents=True)
     subsample_frac = 1.01
     sampling_rate = 100
-    with pytest.raises(ValueError, match=r"subsample_frac must be in \(0\.0, 1\.0\]"):
+    with pytest.raises(ValueError, match=r"^subsample_frac must be in \(0\.0, 1\.0\]"):
         load_ptbxl_full(data_dir, subsample_frac, sampling_rate)
 
 
@@ -743,7 +727,7 @@ def test_load_ptbxl_full_sampling_rate_invalid(tmp_path):
     data_dir.mkdir(parents=True)
     subsample_frac = 1.0
     sampling_rate = 666
-    with pytest.raises(ValueError, match=r"sampling_rate must be 100 or 500"):
+    with pytest.raises(ValueError, match=r"^sampling_rate must be 100 or 500"):
         load_ptbxl_full(data_dir, subsample_frac, sampling_rate)
 
 
@@ -764,10 +748,11 @@ def test_load_ptbxl_full_100hz_full_sample(mock_map, mock_rdsamp, tmp_path):
     ).set_index("ecg_id")
     df.to_csv(data_dir / "ptbxl_database.csv")
 
-    # Fake waveform file structure
+    # Fake waveform file structure (ensure .hea/.dat exist if code checks for them)
     wfdb_dir = data_dir / "records100" / "00000"
     wfdb_dir.mkdir(parents=True)
-    (wfdb_dir / "00123_lr").touch()
+    (wfdb_dir / "00123_lr.hea").touch()
+    (wfdb_dir / "00123_lr.dat").touch()
 
     # Create corresponding scp_statements.csv
     create_dummy_scp_statements(data_dir)
@@ -800,10 +785,11 @@ def test_load_ptbxl_full_500hz_full_sample(mock_map, mock_rdsamp, tmp_path):
     ).set_index("ecg_id")
     df.to_csv(data_dir / "ptbxl_database.csv")
 
-    # Create dummy waveform file path
+    # Create dummy waveform file path (ensure .hea/.dat exist if code checks)
     wfdb_dir = data_dir / "records500" / "00000"
     wfdb_dir.mkdir(parents=True)
-    (wfdb_dir / "00456_hr").touch()
+    (wfdb_dir / "00456_hr.hea").touch()
+    (wfdb_dir / "00456_hr.dat").touch()
 
     # Create corresponding scp_statements.csv
     create_dummy_scp_statements(data_dir)
@@ -836,11 +822,12 @@ def test_load_ptbxl_full_subsample(mock_map, mock_rdsamp, tmp_path):
     ).set_index("ecg_id")
     df.to_csv(data_dir / "ptbxl_database.csv")
 
-    # Create dummy waveform file path
+    # Create dummy waveform file paths (ensure .hea/.dat exist if code checks)
     wfdb_dir = data_dir / "records100" / "00000"
     wfdb_dir.mkdir(parents=True)
     for i in ids:
-        (wfdb_dir / f"{i:05d}_lr").touch()
+        (wfdb_dir / f"{i:05d}_lr.hea").touch()
+        (wfdb_dir / f"{i:05d}_lr.dat").touch()
 
     # Create corresponding scp_statements.csv
     create_dummy_scp_statements(data_dir)
@@ -873,10 +860,11 @@ def test_load_ptbxl_full_returns_unknown_label(mock_map, mock_rdsamp, tmp_path):
     ).set_index("ecg_id")
     df.to_csv(data_dir / "ptbxl_database.csv")
 
-    # Create dummy waveform file path
+    # Create dummy waveform file path (ensure .hea/.dat exist if code checks)
     wfdb_dir = data_dir / "records100" / "00000"
     wfdb_dir.mkdir(parents=True)
-    (wfdb_dir / "00789_lr").touch()
+    (wfdb_dir / "00789_lr.hea").touch()
+    (wfdb_dir / "00789_lr.dat").touch()
 
     # Create corresponding scp_statements.csv
     create_dummy_scp_statements(data_dir)
@@ -900,6 +888,7 @@ def test_load_ptbxl_full_handles_rdsamp_failure(mock_rdsamp, tmp_path):
     data_dir = tmp_path
     records_dir = data_dir / "records100" / "10000"
     records_dir.mkdir(parents=True)
+    (records_dir / "dummy.hea").write_text("")  # ensure header exists if code checks
     (records_dir / "dummy.dat").write_text("")  # placeholder signal file
 
     # Create minimal ptbxl_database.csv
@@ -925,7 +914,7 @@ def test_load_ptbxl_full_handles_rdsamp_failure(mock_rdsamp, tmp_path):
     scp_df.to_csv(scp_path)
 
     # Run function — it should raise an error due to all records failing
-    with pytest.raises(ValueError, match="No valid records were loaded."):
+    with pytest.raises(ValueError, match=r"^No valid records were loaded\."):
         load_ptbxl_full(data_dir=str(data_dir), subsample_frac=1.0)
 
 
@@ -951,7 +940,7 @@ def test_load_ptbxl_full_handles_rdsamp_failure(mock_rdsamp, tmp_path):
         ("bad json", "Unknown"),
         # Empty dictionary
         ({}, "Unknown"),
-        # Empty strinigifed dictionary
+        # Empty stringified dictionary
         ("{}", "Unknown"),
     ],
 )

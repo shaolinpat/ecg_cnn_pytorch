@@ -1,5 +1,23 @@
+# tests/validate.py
+
+"""
+Tests for ecg_cnn.utils.validate.
+
+Covers
+------
+    - validate_hparams_config():
+        * All-valid pass cases and exhaustive parameter validation errors
+    - validate_hparams_formatting():
+        * All-valid pass cases and exhaustive parameter/filename token validation errors
+    - validate_y_true_pred():
+        * Type/shape/dtype checks, mismatched lengths, and bool/int pitfalls
+    - validate_y_probs():
+        * Type/shape/dtype checks, value range enforcement, empty input acceptance
+"""
+
 import numpy as np
 import pytest
+
 from ecg_cnn.utils.validate import (
     validate_hparams_config,
     validate_hparams_formatting,
@@ -29,7 +47,7 @@ def test_validate_hparams_config_all_valid_bare_minimum():
 
 
 def test_validate_hparams_config_model_empty():
-    with pytest.raises(ValueError, match="Model must be a non-empty string."):
+    with pytest.raises(ValueError, match=r"^Model must be a non-empty string."):
         validate_hparams_config(
             model="",
             lr="0.001",
@@ -41,7 +59,7 @@ def test_validate_hparams_config_model_empty():
 
 
 def test_validate_hparams_config_model_not_string():
-    with pytest.raises(ValueError, match="Model must be a non-empty string."):
+    with pytest.raises(ValueError, match=r"^Model must be a non-empty string."):
         validate_hparams_config(
             model={},
             lr="0.001",
@@ -53,7 +71,9 @@ def test_validate_hparams_config_model_not_string():
 
 
 def test_validate_hparams_config_lr_not_int_or_float():
-    with pytest.raises(ValueError, match="Learning rate must be positive int or float"):
+    with pytest.raises(
+        ValueError, match=r"^Learning rate must be positive int or float"
+    ):
         validate_hparams_config(
             model="SomeModel",
             lr="0.001",
@@ -65,7 +85,7 @@ def test_validate_hparams_config_lr_not_int_or_float():
 
 
 def test_validate_hparams_config_lr_negative():
-    with pytest.raises(ValueError, match="Learning rate must be positive"):
+    with pytest.raises(ValueError, match=r"^Learning rate must be positive"):
         validate_hparams_config(
             model="SomeModel",
             lr=-0.001,
@@ -79,7 +99,7 @@ def test_validate_hparams_config_lr_negative():
 def test_validate_hparams_config_lr_too_small():
     with pytest.raises(
         ValueError,
-        match=r"Learning rate must be positive int or float in range \[1e-6, 1\.0\]",
+        match=r"^Learning rate must be positive int or float in range \[1e-6, 1\.0\]",
     ):
         validate_hparams_config(
             model="SomeModel",
@@ -94,7 +114,7 @@ def test_validate_hparams_config_lr_too_small():
 def test_validate_hparams_config_lr_too_large():
     with pytest.raises(
         ValueError,
-        match=r"Learning rate must be positive int or float in range \[1e-6, 1\.0\]",
+        match=r"^Learning rate must be positive int or float in range \[1e-6, 1\.0\]",
     ):
         validate_hparams_config(
             model="SomeModel",
@@ -109,7 +129,7 @@ def test_validate_hparams_config_lr_too_large():
 def test_validate_hparams_config_bs_not_int():
     with pytest.raises(
         ValueError,
-        match=r"Batch size must be an integer in range \[1, 4096\]",
+        match=r"^Batch size must be an integer in range \[1, 4096\]",
     ):
         validate_hparams_config(
             model="SomeModel",
@@ -124,7 +144,7 @@ def test_validate_hparams_config_bs_not_int():
 def test_validate_hparams_config_bs_too_small():
     with pytest.raises(
         ValueError,
-        match=r"Batch size must be an integer in range \[1, 4096\]",
+        match=r"^Batch size must be an integer in range \[1, 4096\]",
     ):
         validate_hparams_config(
             model="SomeModel",
@@ -139,7 +159,7 @@ def test_validate_hparams_config_bs_too_small():
 def test_validate_hparams_config_bs_too_large():
     with pytest.raises(
         ValueError,
-        match=r"Batch size must be an integer in range \[1, 4096\]",
+        match=r"^Batch size must be an integer in range \[1, 4096\]",
     ):
         validate_hparams_config(
             model="SomeModel",
@@ -154,7 +174,7 @@ def test_validate_hparams_config_bs_too_large():
 def test_validate_hparams_config_wd_not_int_or_float():
     with pytest.raises(
         ValueError,
-        match="Weight decay must be int or float",
+        match=r"^Weight decay must be int or float",
     ):
         validate_hparams_config(
             model="SomeModel",
@@ -169,7 +189,7 @@ def test_validate_hparams_config_wd_not_int_or_float():
 def test_validate_hparams_config_wd_not_too_small():
     with pytest.raises(
         ValueError,
-        match=r"Weight decay must be int or float in range \[0.0, 1.0\]",
+        match=r"^Weight decay must be int or float in range \[0.0, 1.0\]",
     ):
         validate_hparams_config(
             model="SomeModel",
@@ -184,7 +204,7 @@ def test_validate_hparams_config_wd_not_too_small():
 def test_validate_hparams_config_wd_too_large():
     with pytest.raises(
         ValueError,
-        match=r"Weight decay must be int or float in range \[0.0, 1.0\]",
+        match=r"^Weight decay must be int or float in range \[0.0, 1.0\]",
     ):
         validate_hparams_config(
             model="SomeModel",
@@ -199,7 +219,7 @@ def test_validate_hparams_config_wd_too_large():
 def test_validate_hparams_config_n_folds_not_int():
     with pytest.raises(
         ValueError,
-        match="n_folds must be a positive integer.",
+        match=r"^n_folds must be a positive integer.",
     ):
         validate_hparams_config(
             model="SomeModel",
@@ -214,7 +234,7 @@ def test_validate_hparams_config_n_folds_not_int():
 def test_validate_hparams_config_n_folds_not_positive_int():
     with pytest.raises(
         ValueError,
-        match="n_folds must be a positive integer.",
+        match=r"^n_folds must be a positive integer.",
     ):
         validate_hparams_config(
             model="SomeModel",
@@ -229,7 +249,7 @@ def test_validate_hparams_config_n_folds_not_positive_int():
 def test_validate_hparams_config_n_folds_not_positive_int_but_float():
     with pytest.raises(
         ValueError,
-        match="n_folds must be a positive integer.",
+        match=r"^n_folds must be a positive integer.",
     ):
         validate_hparams_config(
             model="SomeModel",
@@ -244,7 +264,7 @@ def test_validate_hparams_config_n_folds_not_positive_int_but_float():
 def test_validate_hparams_config_n_epochs_not_int():
     with pytest.raises(
         ValueError,
-        match=r"n_epochs must be int in range \[1, 1000\].",
+        match=r"^n_epochs must be int in range \[1, 1000\].",
     ):
         validate_hparams_config(
             model="SomeModel",
@@ -259,7 +279,7 @@ def test_validate_hparams_config_n_epochs_not_int():
 def test_validate_hparams_config_n_epochs_not_int_but_float():
     with pytest.raises(
         ValueError,
-        match=r"n_epochs must be int in range \[1, 1000\].",
+        match=r"^n_epochs must be int in range \[1, 1000\].",
     ):
         validate_hparams_config(
             model="SomeModel",
@@ -274,7 +294,7 @@ def test_validate_hparams_config_n_epochs_not_int_but_float():
 def test_validate_hparams_config_n_epochs_too_small():
     with pytest.raises(
         ValueError,
-        match=r"n_epochs must be int in range \[1, 1000\].",
+        match=r"^n_epochs must be int in range \[1, 1000\].",
     ):
         validate_hparams_config(
             model="SomeModel",
@@ -289,7 +309,7 @@ def test_validate_hparams_config_n_epochs_too_small():
 def test_validate_hparams_config_n_epochs_too_large():
     with pytest.raises(
         ValueError,
-        match=r"n_epochs must be int in range \[1, 1000\].",
+        match=r"^n_epochs must be int in range \[1, 1000\].",
     ):
         validate_hparams_config(
             model="SomeModel",
@@ -404,7 +424,7 @@ def test_validate_hparams_formatting_fold_None():
 
 
 def test_validate_hparams_formatting_model_empty():
-    with pytest.raises(ValueError, match="Model must be a non-empty string."):
+    with pytest.raises(ValueError, match=r"^Model must be a non-empty string."):
         validate_hparams_formatting(
             model="",
             lr="0.001",
@@ -417,7 +437,7 @@ def test_validate_hparams_formatting_model_empty():
 
 
 def test_validate_hparams_formatting_model_not_string():
-    with pytest.raises(ValueError, match="Model must be a non-empty string."):
+    with pytest.raises(ValueError, match=r"^Model must be a non-empty string."):
         validate_hparams_formatting(
             model=[1, 2],
             lr="0.001",
@@ -430,7 +450,9 @@ def test_validate_hparams_formatting_model_not_string():
 
 
 def test_validate_hparams_formatting_lr_not_int_or_float():
-    with pytest.raises(ValueError, match="Learning rate must be positive int or float"):
+    with pytest.raises(
+        ValueError, match=r"^Learning rate must be positive int or float"
+    ):
         validate_hparams_formatting(
             model="SomeModel",
             lr="0.001",
@@ -443,7 +465,7 @@ def test_validate_hparams_formatting_lr_not_int_or_float():
 
 
 def test_validate_hparams_formatting_lr_negative():
-    with pytest.raises(ValueError, match="Learning rate must be positive"):
+    with pytest.raises(ValueError, match=r"^Learning rate must be positive"):
         validate_hparams_formatting(
             model="SomeModel",
             lr=-0.001,
@@ -458,7 +480,7 @@ def test_validate_hparams_formatting_lr_negative():
 def test_validate_hparams_formatting_lr_too_small():
     with pytest.raises(
         ValueError,
-        match=r"Learning rate must be positive int or float in range \[1e-6, 1\.0\]",
+        match=r"^Learning rate must be positive int or float in range \[1e-6, 1\.0\]",
     ):
         validate_hparams_formatting(
             model="SomeModel",
@@ -474,7 +496,7 @@ def test_validate_hparams_formatting_lr_too_small():
 def test_validate_hparams_formatting_lr_too_large():
     with pytest.raises(
         ValueError,
-        match=r"Learning rate must be positive int or float in range \[1e-6, 1\.0\]",
+        match=r"^Learning rate must be positive int or float in range \[1e-6, 1\.0\]",
     ):
         validate_hparams_formatting(
             model="SomeModel",
@@ -490,7 +512,7 @@ def test_validate_hparams_formatting_lr_too_large():
 def test_validate_hparams_formatting_bs_not_int():
     with pytest.raises(
         ValueError,
-        match=r"Batch size must be an integer in range \[1, 4096\]",
+        match=r"^Batch size must be an integer in range \[1, 4096\]",
     ):
         validate_hparams_formatting(
             model="SomeModel",
@@ -506,7 +528,7 @@ def test_validate_hparams_formatting_bs_not_int():
 def test_validate_hparams_formatting_bs_too_small():
     with pytest.raises(
         ValueError,
-        match=r"Batch size must be an integer in range \[1, 4096\]",
+        match=r"^Batch size must be an integer in range \[1, 4096\]",
     ):
         validate_hparams_formatting(
             model="SomeModel",
@@ -522,7 +544,7 @@ def test_validate_hparams_formatting_bs_too_small():
 def test_validate_hparams_formatting_bs_too_large():
     with pytest.raises(
         ValueError,
-        match=r"Batch size must be an integer in range \[1, 4096\]",
+        match=r"^Batch size must be an integer in range \[1, 4096\]",
     ):
         validate_hparams_formatting(
             model="SomeModel",
@@ -538,7 +560,7 @@ def test_validate_hparams_formatting_bs_too_large():
 def test_validate_hparams_formatting_wd_not_int_or_float():
     with pytest.raises(
         ValueError,
-        match="Weight decay must be int or float",
+        match=r"^Weight decay must be int or float",
     ):
         validate_hparams_formatting(
             model="SomeModel",
@@ -554,7 +576,7 @@ def test_validate_hparams_formatting_wd_not_int_or_float():
 def test_validate_hparams_formatting_wd_not_too_small():
     with pytest.raises(
         ValueError,
-        match=r"Weight decay must be int or float in range \[0.0, 1.0\]",
+        match=r"^Weight decay must be int or float in range \[0.0, 1.0\]",
     ):
         validate_hparams_formatting(
             model="SomeModel",
@@ -570,7 +592,7 @@ def test_validate_hparams_formatting_wd_not_too_small():
 def test_validate_hparams_formatting_wd_too_large():
     with pytest.raises(
         ValueError,
-        match=r"Weight decay must be int or float in range \[0.0, 1.0\]",
+        match=r"^Weight decay must be int or float in range \[0.0, 1.0\]",
     ):
         validate_hparams_formatting(
             model="SomeModel",
@@ -586,7 +608,7 @@ def test_validate_hparams_formatting_wd_too_large():
 def test_validate_hparams_formatting_fold_not_int_but_string():
     with pytest.raises(
         ValueError,
-        match="fold must be a positive integer.",
+        match=r"^fold must be a positive integer.",
     ):
         validate_hparams_formatting(
             model="SomeModel",
@@ -602,7 +624,7 @@ def test_validate_hparams_formatting_fold_not_int_but_string():
 def test_validate_hparams_formatting_fold_not_int_but_float():
     with pytest.raises(
         ValueError,
-        match="fold must be a positive integer.",
+        match=r"^fold must be a positive integer.",
     ):
         validate_hparams_formatting(
             model="SomeModel",
@@ -618,7 +640,7 @@ def test_validate_hparams_formatting_fold_not_int_but_float():
 def test_validate_hparams_formatting_fold_too_small():
     with pytest.raises(
         ValueError,
-        match="fold must be a positive integer.",
+        match=r"^fold must be a positive integer.",
     ):
         validate_hparams_formatting(
             model="SomeModel",
@@ -634,7 +656,7 @@ def test_validate_hparams_formatting_fold_too_small():
 def test_validate_hparams_formatting_epochs_not_int_but_string():
     with pytest.raises(
         ValueError,
-        match=r"epoch must be an integer in range \[1, 1000\]",
+        match=r"^epoch must be an integer in range \[1, 1000\]",
     ):
         validate_hparams_formatting(
             model="SomeModel",
@@ -650,7 +672,7 @@ def test_validate_hparams_formatting_epochs_not_int_but_string():
 def test_validate_hparams_formatting_epochs_not_int_but_float():
     with pytest.raises(
         ValueError,
-        match=r"epoch must be an integer in range \[1, 1000\]",
+        match=r"^epoch must be an integer in range \[1, 1000\]",
     ):
         validate_hparams_formatting(
             model="SomeModel",
@@ -666,7 +688,7 @@ def test_validate_hparams_formatting_epochs_not_int_but_float():
 def test_validate_hparams_formatting_epochs_too_small():
     with pytest.raises(
         ValueError,
-        match=r"epoch must be an integer in range \[1, 1000\]",
+        match=r"^epoch must be an integer in range \[1, 1000\]",
     ):
         validate_hparams_formatting(
             model="SomeModel",
@@ -682,7 +704,7 @@ def test_validate_hparams_formatting_epochs_too_small():
 def test_validate_hparams_formatting_epochs_too_large():
     with pytest.raises(
         ValueError,
-        match=r"epoch must be an integer in range \[1, 1000\]",
+        match=r"^epoch must be an integer in range \[1, 1000\]",
     ):
         validate_hparams_formatting(
             model="SomeModel",
@@ -696,14 +718,14 @@ def test_validate_hparams_formatting_epochs_too_large():
 
 
 def test_validate_hparams_formatting_prefix_not_string():
-    with pytest.raises(ValueError, match="Prefix must be a non-empty string"):
+    with pytest.raises(ValueError, match=r"^Prefix must be a non-empty string"):
         validate_hparams_formatting(
             model="SomeModel", lr=0.001, bs=32, wd=0.001, fold=1, epoch=10, prefix=3
         )
 
 
 def test_validate_hparams_formatting_prefix_empty_string():
-    with pytest.raises(ValueError, match="Prefix must be a non-empty string"):
+    with pytest.raises(ValueError, match=r"^Prefix must be a non-empty string"):
         validate_hparams_formatting(
             model="SomeModel",
             lr=0.001,
@@ -716,7 +738,7 @@ def test_validate_hparams_formatting_prefix_empty_string():
 
 
 def test_validate_hparams_formatting_fname_metric_not_string():
-    with pytest.raises(ValueError, match="fname_metric must be a string"):
+    with pytest.raises(ValueError, match=r"^fname_metric must be a string"):
         validate_hparams_formatting(
             model="SomeModel",
             lr=0.001,
@@ -739,43 +761,43 @@ def test_validate_y_true_pred_valid_lists():
 
 
 def test_validate_y_true_pred_valid_ndarrays():
-    y_true = np.array([0, 1, 2])
-    y_pred = np.array([2, 1, 0])
+    y_true = np.array([0, 1, 2], dtype=np.int64)
+    y_pred = np.array([2, 1, 0], dtype=np.int64)
     validate_y_true_pred(y_true, y_pred)  # Should pass
 
 
 def test_validate_y_true_pred_mismatched_length():
-    with pytest.raises(ValueError, match="same length"):
+    with pytest.raises(ValueError, match=r"^y_true and y_pred must be the same length"):
         validate_y_true_pred([0, 1], [0, 1, 2])
 
 
 def test_validate_y_true_pred_invalid_type_y_true():
-    with pytest.raises(ValueError, match="y_true must be list or ndarray"):
+    with pytest.raises(ValueError, match=r"^y_true must be list or ndarray"):
         validate_y_true_pred("not a list", [0, 1, 2])
 
 
 def test_validate_y_true_pred_invalid_type_y_pred():
-    with pytest.raises(ValueError, match="y_pred must be list or ndarray"):
+    with pytest.raises(ValueError, match=r"^y_pred must be list or ndarray"):
         validate_y_true_pred([0, 1, 2], "not a list")
 
 
 def test_validate_y_true_pred_non_integer_y_true():
-    with pytest.raises(ValueError, match="y_true must contain only integer"):
+    with pytest.raises(ValueError, match=r"^y_true must contain only integer"):
         validate_y_true_pred([0, 1.5, 2], [0, 1, 2])
 
 
 def test_validate_y_true_pred_non_integer_y_pred():
-    with pytest.raises(ValueError, match="y_pred must contain only integer"):
+    with pytest.raises(ValueError, match=r"^y_pred must contain only integer"):
         validate_y_true_pred([0, 1, 2], [0, 1, 2.2])
 
 
 def test_validate_y_true_pred_bool_in_y_true():
-    with pytest.raises(ValueError, match="y_true must contain only integer"):
+    with pytest.raises(ValueError, match=r"^y_true must contain only integer"):
         validate_y_true_pred([0, True, 2], [0, 1, 2])
 
 
 def test_validate_y_true_pred_bool_in_y_pred():
-    with pytest.raises(ValueError, match="y_pred must contain only integer"):
+    with pytest.raises(ValueError, match=r"^y_pred must contain only integer"):
         validate_y_true_pred([0, 1, 2], [True, 1, 2])
 
 
@@ -789,31 +811,35 @@ def test_validate_y_probs_valid_list():
 
 
 def test_validate_y_probs_valid_ndarray():
-    validate_y_probs(np.array([0.25, 0.75]))  # Should pass
+    validate_y_probs(np.array([0.25, 0.75], dtype=float))  # Should pass
 
 
 def test_validate_y_probs_invalid_type():
-    with pytest.raises(ValueError, match="y_probs must be list or ndarray"):
+    with pytest.raises(ValueError, match=r"^y_probs must be list or ndarray"):
         validate_y_probs("not a list")
 
 
 def test_validate_y_probs_contains_int():
-    with pytest.raises(ValueError, match="must contain only float"):
+    with pytest.raises(ValueError, match=r"^y_probs must contain only float"):
         validate_y_probs([0.0, 1, 0.5])  # int is not a float
 
 
 def test_validate_y_probs_contains_bool():
-    with pytest.raises(ValueError, match="must contain only float"):
+    with pytest.raises(ValueError, match=r"^y_probs must contain only float"):
         validate_y_probs([0.0, True, 0.5])  # bool is subclass of int
 
 
 def test_validate_y_probs_out_of_range_low():
-    with pytest.raises(ValueError, match=r"probabilities in \[0.0, 1.0\]"):
+    with pytest.raises(
+        ValueError, match=r"^y_probs must contain probabilities in \[0.0, 1.0\]"
+    ):
         validate_y_probs([-0.1, 0.5, 0.9])
 
 
 def test_validate_y_probs_out_of_range_high():
-    with pytest.raises(ValueError, match=r"probabilities in \[0.0, 1.0\]"):
+    with pytest.raises(
+        ValueError, match=r"^y_probs must contain probabilities in \[0.0, 1.0\]"
+    ):
         validate_y_probs([0.0, 1.1, 0.5])
 
 
@@ -823,17 +849,17 @@ def test_validate_y_probs_empty_list():
 
 def test_validate_y_probs_ndarray_with_integers():
     arr = np.array([0, 1, 1], dtype=int)
-    with pytest.raises(ValueError, match="must contain only float"):
+    with pytest.raises(ValueError, match=r"^y_probs must contain only float values"):
         validate_y_probs(arr)
 
 
 def test_validate_y_probs_ndarray_with_booleans():
     arr = np.array([True, False, True], dtype=bool)
-    with pytest.raises(ValueError, match="must contain only float"):
+    with pytest.raises(ValueError, match=r"^y_probs must contain only float values"):
         validate_y_probs(arr)
 
 
 def test_validate_y_probs_ndarray_too_many_dimensions():
     arr = np.ones((2, 2, 2), dtype=float)
-    with pytest.raises(ValueError, match="must be 1D or 2D"):
+    with pytest.raises(ValueError, match=r"^y_probs must be 1D or 2D"):
         validate_y_probs(arr)
