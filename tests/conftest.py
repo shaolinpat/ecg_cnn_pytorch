@@ -8,7 +8,7 @@ This module centralizes reusable test helpers and environment setup:
     - Seeds Python, NumPy, and (optionally) PyTorch RNGs for reproducibility.
     - Provides factories for TrainConfig instances and argparse-like CLI args.
     - Offers a `patch_paths` fixture that redirects all project path constants
-      (including results, history, models, output, plots, and PTB-XL data dirs)
+      (including results, history, models, output, plots, PTB-XL data, and cache)
       into per-test temporary directories.
     - Supplies small synthetic datasets, default plotting parameters, and a tiny
       torch model for fast forward/eval tests.
@@ -16,7 +16,6 @@ This module centralizes reusable test helpers and environment setup:
 Importing this conftest automatically makes these fixtures available to all
 tests without explicit import.
 """
-
 
 from __future__ import annotations
 
@@ -26,6 +25,7 @@ import os
 import pandas as pd
 import pytest
 import random
+import sys
 
 try:
     import torch
@@ -40,9 +40,14 @@ from ecg_cnn.config.config_loader import TrainConfig
 from ecg_cnn.data import data_utils
 
 
-# -----------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # Global, safe defaults for the whole test run
-# -----------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _isolate_cwd(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
 
 
 @pytest.fixture(autouse=True)
@@ -53,7 +58,12 @@ def _matplotlib_agg_backend():
 
 @pytest.fixture(autouse=True)
 def _reproducible_rng_state():
-    """Make numpy/python/torch RNG deterministic for test stability."""
+    """Make numpy/python/torch RNG deterministic for test stability.
+
+    Seed priority:
+      1) TEST_SEED env var, if set
+      2) default = 22  (project-wide convention; overrides any '42' folklore)
+    """
     SEED = int(os.getenv("TEST_SEED", "22"))
     random.seed(SEED)
     np.random.seed(SEED)
@@ -63,9 +73,9 @@ def _reproducible_rng_state():
         torch.backends.cudnn.benchmark = False
 
 
-# -----------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # Factories you can opt into from any test file
-# -----------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -114,7 +124,7 @@ def patch_paths(monkeypatch, tmp_path: Path):
     per-test temp folders. Creates the common subdirs that code expects.
 
     Returns:
-        (results_dir, history_dir, models_dir, output_dir, plots_dir, ptbxl_dir)
+        (results_dir, history_dir, models_dir, output_dir, plots_dir, ptbxl_dir, cache_dir)
     """
     # Canonical temp directories
     results_dir = tmp_path / "results"
@@ -123,18 +133,28 @@ def patch_paths(monkeypatch, tmp_path: Path):
     output_dir = tmp_path / "output"
     plots_dir = tmp_path / "plots"
     ptbxl_dir = tmp_path / "ptbxl"
+    cache_dir = tmp_path / "cache"
 
     # Create them so any code that writes will succeed
-    for p in (results_dir, history_dir, models_dir, output_dir, plots_dir, ptbxl_dir):
+    for p in (
+        results_dir,
+        history_dir,
+        models_dir,
+        output_dir,
+        plots_dir,
+        ptbxl_dir,
+        cache_dir,
+    ):
         p.mkdir(parents=True, exist_ok=True)
 
-    # Patch the central paths module
+    # Patch the central paths module (single source of truth in app code)
     monkeypatch.setattr(paths, "RESULTS_DIR", results_dir, raising=False)
     monkeypatch.setattr(paths, "HISTORY_DIR", history_dir, raising=False)
     monkeypatch.setattr(paths, "MODELS_DIR", models_dir, raising=False)
     monkeypatch.setattr(paths, "OUTPUT_DIR", output_dir, raising=False)
     monkeypatch.setattr(paths, "PLOTS_DIR", plots_dir, raising=False)
     monkeypatch.setattr(paths, "PTBXL_DATA_DIR", ptbxl_dir, raising=False)
+    monkeypatch.setattr(paths, "CACHE_DIR", cache_dir, raising=False)
     # Some code may rely on a project root—point it at tmp_path if present
     if hasattr(paths, "PROJECT_ROOT"):
         monkeypatch.setattr(paths, "PROJECT_ROOT", tmp_path, raising=False)
@@ -148,21 +168,57 @@ def patch_paths(monkeypatch, tmp_path: Path):
         monkeypatch.setattr(data_utils, "PTBXL_DATA_DIR", ptbxl_dir, raising=False)
         if hasattr(data_utils, "PROJECT_ROOT"):
             monkeypatch.setattr(data_utils, "PROJECT_ROOT", tmp_path, raising=False)
-        # If data_utils re-exports or caches anything from paths, keep it consistent
         if hasattr(data_utils, "RESULTS_DIR"):
             monkeypatch.setattr(data_utils, "RESULTS_DIR", results_dir, raising=False)
         if hasattr(data_utils, "OUTPUT_DIR"):
             monkeypatch.setattr(data_utils, "OUTPUT_DIR", output_dir, raising=False)
+        if hasattr(data_utils, "PLOTS_DIR"):
+            monkeypatch.setattr(data_utils, "PLOTS_DIR", plots_dir, raising=False)
+        if hasattr(data_utils, "CACHE_DIR"):
+            monkeypatch.setattr(data_utils, "CACHE_DIR", cache_dir, raising=False)
     except Exception:
         # If data_utils isn't imported anywhere in the suite, skip silently.
         pass
 
-    return results_dir, history_dir, models_dir, output_dir, plots_dir, ptbxl_dir
+    # Also patch any already-imported modules that cached path constants
+    _targets = [
+        "ecg_cnn.evaluate",
+        "ecg_cnn.train",
+        "ecg_cnn.utils.plot_utils",
+        "ecg_cnn.training.trainer",
+        "ecg_cnn.data.dataset_cache",
+    ]
+    for modname in _targets:
+        mod = sys.modules.get(modname)
+        if not mod:
+            continue
+        for attr, value in (
+            ("RESULTS_DIR", results_dir),
+            ("HISTORY_DIR", history_dir),
+            ("MODELS_DIR", models_dir),
+            ("OUTPUT_DIR", output_dir),
+            ("PLOTS_DIR", plots_dir),
+            ("PTBXL_DATA_DIR", ptbxl_dir),
+            ("CACHE_DIR", cache_dir),
+            ("PROJECT_ROOT", tmp_path),
+        ):
+            if hasattr(mod, attr):
+                monkeypatch.setattr(mod, attr, value, raising=False)
+
+    return (
+        results_dir,
+        history_dir,
+        models_dir,
+        output_dir,
+        plots_dir,
+        ptbxl_dir,
+        cache_dir,
+    )
 
 
-# -----------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # Lightweight model/data helpers (opt-in)
-# -----------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 
 
 @pytest.fixture

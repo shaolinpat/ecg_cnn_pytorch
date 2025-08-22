@@ -17,14 +17,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from ecg_cnn.data.dataset_cache import (
-    _RAM_CACHE,
-    _cache_key,
-    _disk_cache_path,
-    _drop_unknowns,
-    _validate_loaded,
-    get_dataset_cached,
-)
+import ecg_cnn.data.dataset_cache as dc
+
 
 # ------------------------------------------------------------------------------
 # Local fixtures (scoped to this file)
@@ -34,11 +28,11 @@ from ecg_cnn.data.dataset_cache import (
 @pytest.fixture(autouse=True)
 def _clear_ram_cache():
     """Ensure the module-level RAM cache never leaks between tests."""
-    _RAM_CACHE.clear()
+    dc._RAM_CACHE.clear()
     try:
         yield
     finally:
-        _RAM_CACHE.clear()
+        dc._RAM_CACHE.clear()
 
 
 @pytest.fixture
@@ -52,14 +46,10 @@ def patch_dataset_cache_paths(patch_paths, monkeypatch):
     (output_dir, ptbxl_dir)
         The patched output and PTB-XL directories.
     """
-    _, _, _, output_dir, _, ptbxl_dir = patch_paths
+    _, _, _, output_dir, _, _, ptbxl_dir = patch_paths
     # Patch where they're *used* (dataset_cache), not just where defined.
-    monkeypatch.setattr(
-        "ecg_cnn.data.dataset_cache.OUTPUT_DIR", output_dir, raising=True
-    )
-    monkeypatch.setattr(
-        "ecg_cnn.data.dataset_cache.PTBXL_DATA_DIR", ptbxl_dir, raising=True
-    )
+    monkeypatch.setattr(dc, "OUTPUT_DIR", output_dir, raising=True)
+    monkeypatch.setattr(dc, "PTBXL_DATA_DIR", ptbxl_dir, raising=True)
     return output_dir, ptbxl_dir
 
 
@@ -73,9 +63,9 @@ def _fake_loaded(n: int = 4, unknown: bool = False):
     return X, y, meta
 
 
-# ==============================================================================
+# ------------------------------------------------------------------------------
 # A. Basic roundtrip & simple parameter validation
-# ==============================================================================
+# ------------------------------------------------------------------------------
 
 
 def test_cached_roundtrip(patch_paths, make_train_config, monkeypatch):
@@ -86,16 +76,14 @@ def test_cached_roundtrip(patch_paths, make_train_config, monkeypatch):
         meta = pd.DataFrame({"id": [0, 1, 2, 3]})
         return X, y, meta
 
-    monkeypatch.setattr(
-        "ecg_cnn.data.dataset_cache.load_ptbxl_sample", fake_sample, raising=True
-    )
+    monkeypatch.setattr(dc, "load_ptbxl_sample", fake_sample, raising=True)
 
     cfg = make_train_config(sample_only=True)
 
     # first call: force reload to bypass any RAM/disk cache
-    X1, y1, m1 = get_dataset_cached(cfg, use_disk_cache=True, force_reload=True)
+    X1, y1, m1 = dc.get_dataset_cached(cfg, use_disk_cache=True, force_reload=True)
     # second call: should come from cache, identical content
-    X2, y2, m2 = get_dataset_cached(cfg, use_disk_cache=True, force_reload=False)
+    X2, y2, m2 = dc.get_dataset_cached(cfg, use_disk_cache=True, force_reload=False)
 
     assert (
         isinstance(X1, np.ndarray)
@@ -112,24 +100,24 @@ def test_invalid_sampling_rate(patch_paths, make_train_config):
     # Invalid sampling_rate value is rejected early.
     cfg = make_train_config(sampling_rate=123)
     with pytest.raises(ValueError, match=r"^cfg\.sampling_rate must be 100 or 500"):
-        get_dataset_cached(cfg)
+        dc.get_dataset_cached(cfg)
 
 
 def test_subsample_bounds(patch_paths, make_train_config):
     # subsample_frac must be within (0, 1].
     cfg = make_train_config(subsample_frac=0.0)
     with pytest.raises(ValueError, match=r"^cfg\.subsample_frac must be in \(0, 1\]"):
-        get_dataset_cached(cfg)
+        dc.get_dataset_cached(cfg)
 
 
-# ==============================================================================
+# ------------------------------------------------------------------------------
 # B. _validate_cfg branches (type/value checks)
-# ==============================================================================
+# ------------------------------------------------------------------------------
 
 
 def test_get_dataset_cached_rejects_nontrainconfig_typeerror(patch_paths):
     with pytest.raises(TypeError, match=r"^cfg must be TrainConfig"):
-        get_dataset_cached(cfg="not-a-config")  # type: ignore[arg-type]
+        dc.get_dataset_cached(cfg="not-a-config")  # type: ignore[arg-type]
 
 
 def test_get_dataset_cached_validate_cfg_bad_sample_only_type(
@@ -137,7 +125,7 @@ def test_get_dataset_cached_validate_cfg_bad_sample_only_type(
 ):
     bad = make_train_config(sample_only="yes")  # type: ignore[arg-type]
     with pytest.raises(TypeError, match=r"^cfg\.sample_only must be bool"):
-        get_dataset_cached(bad)
+        dc.get_dataset_cached(bad)
 
 
 def test_get_dataset_cached_validate_cfg_subsample_out_of_range(
@@ -145,7 +133,7 @@ def test_get_dataset_cached_validate_cfg_subsample_out_of_range(
 ):
     bad = make_train_config(subsample_frac=0.0)
     with pytest.raises(ValueError, match=r"^cfg\.subsample_frac must be in \(0, 1\]"):
-        get_dataset_cached(bad)
+        dc.get_dataset_cached(bad)
 
 
 def test_get_dataset_cached_validate_cfg_bad_sampling_rate_value(
@@ -153,7 +141,7 @@ def test_get_dataset_cached_validate_cfg_bad_sampling_rate_value(
 ):
     bad = make_train_config(sampling_rate=250)
     with pytest.raises(ValueError, match=r"^cfg\.sampling_rate must be 100 or 500"):
-        get_dataset_cached(bad)
+        dc.get_dataset_cached(bad)
 
 
 def test_get_dataset_cached_validate_cfg_nonexistent_dirs(
@@ -161,16 +149,16 @@ def test_get_dataset_cached_validate_cfg_nonexistent_dirs(
 ):
     bad1 = make_train_config(data_dir=tmp_path / "missingA")
     with pytest.raises(ValueError, match=r"^cfg\.data_dir does not exist"):
-        get_dataset_cached(bad1)
+        dc.get_dataset_cached(bad1)
 
     bad2 = make_train_config(sample_dir=tmp_path / "missingB")
     with pytest.raises(ValueError, match=r"^cfg\.sample_dir does not exist"):
-        get_dataset_cached(bad2)
+        dc.get_dataset_cached(bad2)
 
 
-# ==============================================================================
+# ------------------------------------------------------------------------------
 # C. Cache behavior: RAM, disk, force-reload; sample vs full loaders
-# ==============================================================================
+# ------------------------------------------------------------------------------
 
 
 def test_get_dataset_cached_uses_ram_cache_on_second_call(
@@ -183,18 +171,16 @@ def test_get_dataset_cached_uses_ram_cache_on_second_call(
         calls["n"] += 1
         return _fake_loaded(n=3)
 
-    monkeypatch.setattr(
-        "ecg_cnn.data.dataset_cache.load_ptbxl_sample", fake_sample, raising=True
-    )
+    monkeypatch.setattr(dc, "load_ptbxl_sample", fake_sample, raising=True)
 
     cfg = make_train_config(sample_only=True)
 
     # 1) populate RAM cache
-    X1, y1, m1 = get_dataset_cached(cfg, use_disk_cache=False, force_reload=False)
+    X1, y1, m1 = dc.get_dataset_cached(cfg, use_disk_cache=False, force_reload=False)
     assert calls["n"] == 1
 
     # 2) second call should return from RAM (no new load)
-    X2, y2, m2 = get_dataset_cached(cfg, use_disk_cache=False, force_reload=False)
+    X2, y2, m2 = dc.get_dataset_cached(cfg, use_disk_cache=False, force_reload=False)
     assert calls["n"] == 1
     assert X1.shape == X2.shape and y1 == y2 and len(m1) == len(m2)
 
@@ -210,29 +196,27 @@ def test_get_dataset_cached_reads_from_disk_cache_when_present(
         calls["n"] += 1
         return _fake_loaded(n=5)
 
-    monkeypatch.setattr(
-        "ecg_cnn.data.dataset_cache.load_ptbxl_sample", fake_sample, raising=True
-    )
+    monkeypatch.setattr(dc, "load_ptbxl_sample", fake_sample, raising=True)
 
     cfg = make_train_config(sample_only=True)
 
-    cache_file = _disk_cache_path(_cache_key(cfg))
+    cache_file = dc._disk_cache_path(dc._cache_key(cfg))
     cache_file.unlink(missing_ok=True)
 
     # 1) Prime: write .npz to disk via fresh load
-    X1, y1, m1 = get_dataset_cached(cfg, use_disk_cache=True, force_reload=True)
+    X1, y1, m1 = dc.get_dataset_cached(cfg, use_disk_cache=True, force_reload=True)
     assert calls["n"] == 1
     assert cache_file.exists()
     assert cache_file.parent == (output_dir / "cache")
 
     # filename should be derived from the cache key (allow module prefix)
-    assert cache_file.stem.endswith(_cache_key(cfg))
+    assert cache_file.stem.endswith(dc._cache_key(cfg))
 
     # 2) Critical: clear RAM so the next call must hit the DISK READ branch
-    _RAM_CACHE.clear()
+    dc._RAM_CACHE.clear()
 
     # 3) Read from disk (no new loader call)
-    X2, y2, m2 = get_dataset_cached(cfg, use_disk_cache=True, force_reload=False)
+    X2, y2, m2 = dc.get_dataset_cached(cfg, use_disk_cache=True, force_reload=False)
     assert calls["n"] == 1
     np.testing.assert_array_equal(X1, X2)
     assert y1 == y2
@@ -248,20 +232,18 @@ def test_get_dataset_cached_force_reload_bypasses_caches(
         calls["n"] += 1
         return _fake_loaded(n=2)
 
-    monkeypatch.setattr(
-        "ecg_cnn.data.dataset_cache.load_ptbxl_sample", fake_sample, raising=True
-    )
+    monkeypatch.setattr(dc, "load_ptbxl_sample", fake_sample, raising=True)
 
     cfg = make_train_config(sample_only=True)
 
-    key = _cache_key(cfg)
-    cache_file = _disk_cache_path(key)
+    key = dc._cache_key(cfg)
+    cache_file = dc._disk_cache_path(key)
     cache_file.unlink(missing_ok=True)
 
-    _ = get_dataset_cached(cfg, use_disk_cache=True, force_reload=False)
+    _ = dc.get_dataset_cached(cfg, use_disk_cache=True, force_reload=False)
     assert calls["n"] == 1
 
-    _ = get_dataset_cached(cfg, use_disk_cache=True, force_reload=True)
+    _ = dc.get_dataset_cached(cfg, use_disk_cache=True, force_reload=True)
     assert calls["n"] == 2
 
 
@@ -272,12 +254,10 @@ def test_get_dataset_cached_sample_only_calls_sample_loader_and_drops_unknowns(
     def fake_sample(**kwargs):
         return _fake_loaded(n=4, unknown=True)
 
-    monkeypatch.setattr(
-        "ecg_cnn.data.dataset_cache.load_ptbxl_sample", fake_sample, raising=True
-    )
+    monkeypatch.setattr(dc, "load_ptbxl_sample", fake_sample, raising=True)
 
     cfg = make_train_config(sample_only=True)
-    X, y, meta = get_dataset_cached(cfg, use_disk_cache=False, force_reload=False)
+    X, y, meta = dc.get_dataset_cached(cfg, use_disk_cache=False, force_reload=False)
     assert len(y) == 3 and "Unknown" not in y
 
 
@@ -295,15 +275,11 @@ def test_get_dataset_cached_full_calls_full_loader(
         calls["full"] += 1
         return _fake_loaded(n=6)
 
-    monkeypatch.setattr(
-        "ecg_cnn.data.dataset_cache.load_ptbxl_sample", fake_sample, raising=True
-    )
-    monkeypatch.setattr(
-        "ecg_cnn.data.dataset_cache.load_ptbxl_full", fake_full, raising=True
-    )
+    monkeypatch.setattr(dc, "load_ptbxl_sample", fake_sample, raising=True)
+    monkeypatch.setattr(dc, "load_ptbxl_full", fake_full, raising=True)
 
     cfg = make_train_config(sample_only=False)
-    X, y, meta = get_dataset_cached(cfg, use_disk_cache=False)
+    X, y, meta = dc.get_dataset_cached(cfg, use_disk_cache=False)
     assert calls["full"] == 1 and calls["sample"] == 0
 
 
@@ -318,18 +294,16 @@ def test_get_dataset_cached_raises_when_all_labels_unknown(
         meta = pd.DataFrame({"id": [0, 1]})
         return X, y, meta
 
-    monkeypatch.setattr(
-        "ecg_cnn.data.dataset_cache.load_ptbxl_sample", fake_sample, raising=True
-    )
+    monkeypatch.setattr(dc, "load_ptbxl_sample", fake_sample, raising=True)
     cfg = make_train_config(sample_only=True)
 
     with pytest.raises(ValueError, match=r"^Loaded dataset is empty\."):
-        get_dataset_cached(cfg, use_disk_cache=False, force_reload=True)
+        dc.get_dataset_cached(cfg, use_disk_cache=False, force_reload=True)
 
 
-# ==============================================================================
+# ------------------------------------------------------------------------------
 # D. _canon_paths and _cache_key when paths differ
-# ==============================================================================
+# ------------------------------------------------------------------------------
 
 
 def test_get_dataset_cached_cache_key_differs_when_paths_change(
@@ -341,7 +315,7 @@ def test_get_dataset_cached_cache_key_differs_when_paths_change(
     cfg1 = make_train_config(
         data_dir=None, sample_dir=None
     )  # resolves to patched PTBXL_DATA_DIR
-    key1 = _cache_key(cfg1)
+    key1 = dc._cache_key(cfg1)
 
     alt_data = tmp_path / "alt_ptbxl"
     alt_data.mkdir(parents=True, exist_ok=True)
@@ -349,7 +323,7 @@ def test_get_dataset_cached_cache_key_differs_when_paths_change(
     sdir.mkdir(parents=True, exist_ok=True)
 
     cfg2 = make_train_config(data_dir=str(alt_data), sample_dir=str(sdir))
-    key2 = _cache_key(cfg2)
+    key2 = dc._cache_key(cfg2)
 
     assert key1 != key2
 
@@ -366,26 +340,26 @@ def test_cache_key_uses_patched_default_ptbxl_dir(
     cfg_none = make_train_config(data_dir=None, sample_dir=None)
     cfg_explicit = make_train_config(data_dir=str(ptbxl_dir), sample_dir=None)
 
-    assert _cache_key(cfg_none) == _cache_key(cfg_explicit)
+    assert dc._cache_key(cfg_none) == dc._cache_key(cfg_explicit)
 
 
-# ==============================================================================
+# ------------------------------------------------------------------------------
 # E. Additional _validate_cfg and _validate_loaded error paths
-# ==============================================================================
+# ------------------------------------------------------------------------------
 
 
 def test_validate_cfg_subsample_frac_not_floatlike(patch_paths, make_train_config):
     # subsample_frac must be float-like
     bad = make_train_config(subsample_frac="nope")  # not float-like
     with pytest.raises(TypeError, match=r"^cfg\.subsample_frac must be float-like"):
-        get_dataset_cached(bad)
+        dc.get_dataset_cached(bad)
 
 
 def test_validate_cfg_sampling_rate_wrong_type(patch_paths, make_train_config):
     # sampling rate must be an int
     bad = make_train_config(sampling_rate="500")  # wrong type (string)
     with pytest.raises(TypeError, match=r"^cfg\.sampling_rate must be int"):
-        get_dataset_cached(bad)
+        dc.get_dataset_cached(bad)
 
 
 def test_validate_loaded_raises_on_bad_ndim(
@@ -398,12 +372,10 @@ def test_validate_loaded_raises_on_bad_ndim(
         meta = pd.DataFrame({"id": range(5)})
         return X, y, meta
 
-    monkeypatch.setattr(
-        "ecg_cnn.data.dataset_cache.load_ptbxl_sample", fake_sample, raising=True
-    )
+    monkeypatch.setattr(dc, "load_ptbxl_sample", fake_sample, raising=True)
     cfg = make_train_config(sample_only=True)
     with pytest.raises(ValueError, match=r"^X must be a numpy array with ndim>=2"):
-        get_dataset_cached(cfg, use_disk_cache=False, force_reload=True)
+        dc.get_dataset_cached(cfg, use_disk_cache=False, force_reload=True)
 
 
 def test_validate_loaded_raises_on_bad_meta_type(
@@ -416,13 +388,11 @@ def test_validate_loaded_raises_on_bad_meta_type(
         meta = {"id": [0, 1, 2, 3]}  # not a DataFrame
         return X, y, meta
 
-    monkeypatch.setattr(
-        "ecg_cnn.data.dataset_cache.load_ptbxl_sample", fake_sample, raising=True
-    )
+    monkeypatch.setattr(dc, "load_ptbxl_sample", fake_sample, raising=True)
 
     cfg = make_train_config(sample_only=True)
     with pytest.raises(ValueError, match=r"^meta must be a pandas DataFrame"):
-        get_dataset_cached(cfg, use_disk_cache=False, force_reload=True)
+        dc.get_dataset_cached(cfg, use_disk_cache=False, force_reload=True)
 
 
 def test_validate_loaded_raises_on_empty_dataset(
@@ -435,12 +405,10 @@ def test_validate_loaded_raises_on_empty_dataset(
         meta = pd.DataFrame({"id": []})
         return X, y, meta
 
-    monkeypatch.setattr(
-        "ecg_cnn.data.dataset_cache.load_ptbxl_sample", fake_sample, raising=True
-    )
+    monkeypatch.setattr(dc, "load_ptbxl_sample", fake_sample, raising=True)
     cfg = make_train_config(sample_only=True)
     with pytest.raises(ValueError, match=r"^Loaded dataset is empty\."):
-        get_dataset_cached(cfg, use_disk_cache=False, force_reload=True)
+        dc.get_dataset_cached(cfg, use_disk_cache=False, force_reload=True)
 
 
 def test_validate_loaded_raises_on_length_mismatch_pre_drop_path(
@@ -453,16 +421,14 @@ def test_validate_loaded_raises_on_length_mismatch_pre_drop_path(
         meta = pd.DataFrame({"id": [0, 1, 2, 3]})
         return X, y, meta
 
-    monkeypatch.setattr(
-        "ecg_cnn.data.dataset_cache.load_ptbxl_sample", fake_sample, raising=True
-    )
+    monkeypatch.setattr(dc, "load_ptbxl_sample", fake_sample, raising=True)
 
     cfg = make_train_config(sample_only=True)
     with pytest.raises(
         ValueError,
         match=r"^Length mismatch before drop: len\(X\)=4, len\(y\)=3, len\(meta\)=4",
     ):
-        get_dataset_cached(cfg, use_disk_cache=False, force_reload=True)
+        dc.get_dataset_cached(cfg, use_disk_cache=False, force_reload=True)
 
 
 def test_validate_loaded_meta_type_error_hits():
@@ -471,7 +437,7 @@ def test_validate_loaded_meta_type_error_hits():
     y = ["NORM", "MI"]
     meta = {"id": [0, 1]}  # not a DataFrame
     with pytest.raises(ValueError, match=r"^meta must be a pandas DataFrame"):
-        _validate_loaded(X, y, meta)  # type: ignore[arg-type]
+        dc._validate_loaded(X, y, meta)  # type: ignore[arg-type]
 
 
 def test_validate_loaded_length_mismatch():
@@ -482,12 +448,12 @@ def test_validate_loaded_length_mismatch():
     with pytest.raises(
         ValueError, match=r"^Length mismatch: len\(X\)=4, len\(y\)=3, len\(meta\)=4"
     ):
-        _validate_loaded(X, y, meta)
+        dc._validate_loaded(X, y, meta)
 
 
-# ==============================================================================
+# ------------------------------------------------------------------------------
 # F. _drop_unknowns error paths
-# ==============================================================================
+# ------------------------------------------------------------------------------
 
 
 def test_drop_unknowns_raises_when_meta_not_dataframe():
@@ -495,7 +461,7 @@ def test_drop_unknowns_raises_when_meta_not_dataframe():
     y = ["NORM", "NORM", "NORM"]
     meta = {"id": [0, 1, 2]}  # dict, not DataFrame
     with pytest.raises(ValueError, match=r"^meta must be a pandas DataFrame"):
-        _drop_unknowns(X, y, meta)  # type: ignore[arg-type]
+        dc._drop_unknowns(X, y, meta)  # type: ignore[arg-type]
 
 
 def test_drop_unknowns_raises_on_length_mismatch_precheck():
@@ -506,7 +472,7 @@ def test_drop_unknowns_raises_on_length_mismatch_precheck():
         ValueError,
         match=r"^Length mismatch before drop: len\(X\)=3, len\(y\)=2, len\(meta\)=3",
     ):
-        _drop_unknowns(X, y, meta)
+        dc._drop_unknowns(X, y, meta)
 
 
 def test_drop_unknowns_noop_when_no_unknowns():
@@ -515,7 +481,7 @@ def test_drop_unknowns_noop_when_no_unknowns():
     y = ["NORM", "MI", "STTC"]
     meta = pd.DataFrame({"id": [0, 1, 2]})
 
-    X2, y2, meta2 = _drop_unknowns(X, y, meta)
+    X2, y2, meta2 = dc._drop_unknowns(X, y, meta)
     assert X2.shape == X.shape
     assert y2 == y
     pd.testing.assert_frame_equal(meta2, meta)

@@ -1,12 +1,36 @@
 #!/usr/bin/env python
+"""
+Unified evaluator for trained ECG CNN runs.
+
+This script:
+  1) Locates the most recent `config_*.yaml` in RESULTS_DIR (unchanged behavior).
+  2) Loads that config and its embedded `tag` (plus optional `fold`).
+  3) Loads the corresponding `summary_<tag>.json` and selects the "best" run:
+       - If --fold is passed, use that fold.
+       - Else pick the summary entry with the lowest recorded loss.
+  4) Loads data using the same sampling/subsample settings from the config.
+  5) Restores the trained model weights and runs inference over the dataset.
+  6) Prints a classification report and (via evaluate_and_plot) saves artifacts.
+
+Notes
+-----
+- All original commented-out plotting helpers are preserved exactly as-is.
+- Paths come from ecg_cnn.paths; nothing is hardcoded.
+- RNG is seeded to 22 for reproducibility.
+- Additional validation is included to fail fast with clear messages.
+
+CLI
+---
+python -m ecg_cnn.evaluate              # evaluate latest config's tag, best
+                                        # fold by loss
+python -m ecg_cnn.evaluate --fold 3     # force a specific fold
+"""
 
 import argparse
 import json
-import matplotlib.pyplot as plt
 import numpy as np
 import os
-import pandas as pd
-import seaborn as sns
+import sys
 import time
 import torch
 import torch.nn as nn
@@ -14,24 +38,24 @@ from pathlib import Path
 from sklearn.metrics import classification_report
 from sklearn.preprocessing import LabelEncoder
 from torch.utils.data import TensorDataset, DataLoader
+from typing import Any, Dict, List, Optional, Tuple
 
 from ecg_cnn.config.config_loader import load_training_config, TrainConfig
 from ecg_cnn.data.data_utils import load_ptbxl_full, FIVE_SUPERCLASSES
 from ecg_cnn.models import MODEL_CLASSES
 from ecg_cnn.paths import (
     HISTORY_DIR,
-    MODELS_DIR,
     RESULTS_DIR,
     OUTPUT_DIR,
     PTBXL_DATA_DIR,
 )
 from ecg_cnn.utils.plot_utils import (
-    save_pr_threshold_curve,
-    save_confusion_matrix,
-    save_plot_curves,
     evaluate_and_plot,
 )
 
+# ------------------------------------------------------------------------------
+# Globals
+# ------------------------------------------------------------------------------
 SEED = 22
 torch.manual_seed(SEED)
 np.random.seed(SEED)
@@ -39,46 +63,322 @@ torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
 
-def main(fold_override=None):
-    t0 = time.time()
+# ------------------------------------------------------------------------------
+# Helpers
+# ------------------------------------------------------------------------------
+def _latest_config_path() -> Path:
+    """
+    Return the newest `config_*.yaml` in RESULTS_DIR.
 
-    # Dynamically find the latest saved config YAML
-    configs = sorted((RESULTS_DIR).glob("config_*.yaml"), reverse=True)
-    if not configs:
-        raise FileNotFoundError(f"No config_*.yaml found in {RESULTS_DIR}")
-    config_path = configs[0]
-    print(f"Loading config from: {config_path}")
+    Returns:
+        Path to latest config if found, else None. If None a helpful message can
+        (and should) be printed at the calling location.
+    """
+    configs = sorted(RESULTS_DIR.glob("config_*.yaml"), reverse=True)
+    return configs[0] if configs else None
 
-    # config = load_training_config(config_path)
 
-    # Load raw config and attach extra fields manually
+def _load_config_and_extras(
+    config_path: Path, fold_override: Optional[int]
+) -> Tuple[TrainConfig, Dict[str, Any]]:
+    """
+    Load a potentially-extended training config (with extra keys like `tag`, `fold`)
+    and return (TrainConfig, extras_dict). Extras are applied back onto the TrainConfig.
+
+    Args:
+        config_path: Path to config YAML.
+        fold_override: Optional fold override from CLI.
+
+    Returns:
+        (config: TrainConfig, extras: dict)
+    """
     raw = load_training_config(config_path, strict=False)
 
-    # Separate known and extra fields
-    extra = {}
-    # for key in ("fold", "tag", "config"):
-    #     extra[key] = raw.pop(key, None)
-
+    extras: Dict[str, Any] = {}
     for key in ("fold", "tag", "config"):
+        print(f"^^^^^key = {key}")
         if key == "fold" and fold_override is not None:
-            extra[key] = fold_override  # manual CLI override
+            extras[key] = fold_override
         else:
-            extra[key] = raw.pop(key, None)
+            extras[key] = raw.pop(key, None)
 
     try:
         config = TrainConfig(**raw)
     except TypeError as e:
-        print(">>> CAUGHT TYPEERROR:", e)
         raise ValueError(f"Invalid config structure or missing fields: {e}")
 
-    for key, val in extra.items():
+    for key, val in extras.items():
         if val is not None:
             setattr(config, key, val)
 
-    print(f"Config file contents: {config}")
-    print(f"extra contents: {extra}")
+    return config, extras
 
-    # Load data
+
+def _read_summary(tag: str) -> List[dict]:
+    """
+    Load the summary JSON for a tag.
+
+    Args:
+        tag: Training tag used for filenames.
+
+    Returns:
+        List of summary dicts.
+
+    Raises:
+        FileNotFoundError: if the summary file does not exist.
+        ValueError: if the file is empty or malformed.
+    """
+    # summary_path = OUTPUT_DIR / "results" / f"summary_{tag}.json"
+    summary_path = RESULTS_DIR / f"summary_{tag}.json"
+    if not summary_path.exists():
+        raise FileNotFoundError(
+            f"Missing summary for tag '{tag}': {summary_path}. "
+            f"Did train.py finish and write summaries?"
+        )
+    with open(summary_path, "r") as f:
+        summaries = json.load(f)
+    if not isinstance(summaries, list) or not summaries:
+        raise ValueError(f"Summary JSON malformed or empty: {summary_path}")
+    return summaries
+
+
+def _select_best_entry(summaries: List[dict], fold_override: Optional[int]) -> dict:
+    """
+    Select the best summary entry.
+
+    Priority:
+      - If `fold_override` is provided, pick the entry matching that fold.
+      - Else pick the entry with the lowest 'loss'.
+
+    Args:
+        summaries: List of summary dicts.
+        fold_override: Optional fold to force.
+
+    Returns:
+        Chosen summary entry.
+
+    Raises:
+        ValueError: if a requested fold is not present or entries lack 'loss'.
+    """
+    if fold_override is not None:
+        matching = [s for s in summaries if s.get("fold") == fold_override]
+        if not matching:
+            raise ValueError(f"No summary entry found for fold {fold_override}")
+        return min(matching, key=lambda d: float(d["loss"]))
+
+    # No override: choose lowest loss across all
+    if not all("loss" in s for s in summaries):
+        raise ValueError("Summary entries missing 'loss' key; cannot select best.")
+
+    print(f"^^^^min loss: {min(summaries, key=lambda d: float(d['loss']))}")
+    return min(summaries, key=lambda d: float(d["loss"]))
+
+
+def _load_history(
+    tag: str, fold: Optional[int]
+) -> Tuple[List[float], List[float], List[float], List[float]]:
+    """
+    Load history arrays (train_acc, val_acc, train_loss, val_loss) for the given
+        tag/fold.
+
+    Args:
+        tag: Training tag.
+        fold: 1-based fold index, or None.
+
+    Returns:
+        (train_accs, val_accs, train_loss, val_loss). Lists may be empty if
+            missing.
+    """
+    train_accs: List[float] = []
+    val_accs: List[float] = []
+    train_loss: List[float] = []
+    val_loss: List[float] = []
+
+    if fold is None:
+        return train_accs, val_accs, train_loss, val_loss
+
+    hist_path = HISTORY_DIR / f"history_{tag}_fold{fold}.json"
+    print(f"history_path: {hist_path}")
+    if hist_path.exists():
+        with open(hist_path, "r") as f:
+            hist = json.load(f)
+        train_accs = hist.get("train_acc", []) or []
+        val_accs = hist.get("val_acc", []) or []
+        train_loss = hist.get("train_loss", []) or []
+        val_loss = hist.get("val_loss", []) or []
+    else:
+        print(f"(History not found at {hist_path})")
+
+    return train_accs, val_accs, train_loss, val_loss
+
+
+def _resolve_ovr_flags(
+    config: TrainConfig,
+    cli_ovr_enable: Optional[bool] = None,
+    cli_ovr_classes: Optional[List[str]] = None,
+) -> Tuple[bool, Optional[set]]:
+    """
+    Resolve one-vs-rest flags from config, environment, and CLI.
+
+    Precedence
+    ----------
+        CLI > ENV > Config
+
+    Args
+    ----
+        config: Training config with defaults.
+        cli_ovr_enable: Optional boolean from CLI (--enable_ovr or
+            --disable_ovr).
+        cli_ovr_classes: Optional list of class names from CLI (--ovr_classes).
+
+    Returns:
+        (enable_ovr: bool, ovr_classes: Optional[set[str]])
+    """
+
+    valid_set = set(FIVE_SUPERCLASSES)
+
+    def _validate_strict(names: Optional[List[str]], source: str) -> List[str]:
+        """
+        Normalize, de-duplicate, and enforce strict membership.
+        If any unknowns are found, exit with a clear message.
+        """
+        if not names:
+            return []
+        cleaned = [str(x).strip() for x in names if str(x).strip()]
+        # de-duplicate preserving order
+        unique, seen = [], set()
+        for c in cleaned:
+            if c not in seen:
+                unique.append(c)
+                seen.add(c)
+
+        bad = [c for c in unique if c not in valid_set]
+        if bad:
+            print(
+                f"\nError: unknown OvR class(es) from {source}: {bad}."
+                f"\nValid options: {sorted(valid_set)}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+        return unique
+
+    # 1) Start from config
+    enable_ovr = bool(getattr(config, "plots_enable_ovr", False))
+    ovr_classes = getattr(config, "plots_ovr_classes", []) or []
+    if not isinstance(ovr_classes, list):
+        ovr_classes = []
+    ovr_classes = _validate_strict(ovr_classes, "config")
+    if ovr_classes and not enable_ovr:
+        enable_ovr = True
+
+    # 2) ENV overrides
+    env_classes = os.getenv("ECG_PLOTS_OVR_CLASSES")
+    if env_classes is not None:
+        if env_classes.strip() == "":
+            print(
+                "\nError: empty OvR class list provided via envioronment."
+                "\nUse ECG_PLOTS_ENABLE_OVR=1 to enable for all classes "
+                "or set ECG_PLOTS_OVR_CLASSES=CLASS1,CLASS2 (etc.) for a subset.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        env_list = [c.strip() for c in env_classes.split(",")]  # if env_classes else []
+        env_list = _validate_strict(env_list, "environment")
+        # reached only if non-empty AND all valid
+        # if env_list:
+        ovr_classes = env_list
+        enable_ovr = True
+
+    env_enable = os.getenv("ECG_PLOTS_ENABLE_OVR")
+    if env_enable is not None:
+        enable_ovr = env_enable.strip().lower() in {"1", "true", "yes"}
+
+    # 3) CLI overrides
+    if cli_ovr_classes is not None:
+
+        if not cli_ovr_classes:
+            print(
+                "\nError: empty OvR class list providaed by CLI."
+                "\nUse --enable_ovr for all classes or "
+                "--ovr_classes CLASS1,CLASS2 (ect.) for a subset.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+        cli_clean = _validate_strict(cli_ovr_classes, "CLI")
+        ovr_classes = cli_clean
+        if cli_clean and cli_ovr_enable is None:
+            enable_ovr = True
+
+    if cli_ovr_enable is not None:
+        enable_ovr = cli_ovr_enable
+        if cli_ovr_enable is False:
+            ovr_classes = []
+
+    return enable_ovr, (set(ovr_classes) if ovr_classes else None)
+
+
+# ------------------------------------------------------------------------------
+# Main
+# ------------------------------------------------------------------------------
+def main(
+    enable_ovr: Optional[bool] = None,
+    ovr_classes: Optional[set[str]] = None,
+    fold_override: Optional[int] = None,
+) -> None:
+    """
+    Entry point for evaluating the latest training run.
+
+    Steps:
+      * Load newest config_* file and extract TrainConfig + extras (tag/fold).
+      * Load dataset per config settings (subsample/sampling_rate).
+      * Choose best summary entry (lowest loss unless fold is forced).
+      * Restore the trained model for that entry and run inference.
+      * Print a classification report and call evaluate_and_plot to save
+        artifacts.
+
+    Args:
+        fold_override: Optional 1-based fold index (overrides any fold in
+        config/summary).
+
+    Raises:
+        FileNotFoundError / ValueError on missing/malformed artifacts.
+    """
+    t0 = time.time()
+
+    # Find & load the newest config file
+    config_path = _latest_config_path()
+    if config_path is None:
+        print(
+            f"No training configs found in {RESULTS_DIR}.\n"
+            "Run train.py first or pass --config <path>."
+        )
+        sys.exit(1)
+    print(f"Loading config from: {config_path}")
+    config, extras = _load_config_and_extras(config_path, fold_override)
+
+    if not getattr(config, "batch_size", None):
+        raise ValueError("Config is missing required field 'batch_size'.")
+    if not getattr(config, "model", None):
+        raise ValueError("Config is missing required field 'model'.")
+    tag = getattr(config, "tag", None) or extras.get("tag")
+    if not tag:
+        raise ValueError("Config is missing 'tag'; cannot locate summaries/models.")
+
+    print(f"Config file contents: {config}")
+    print(f"extra contents: {extras}")
+
+    print(f"    enable_ovr: {enable_ovr}, ovr_classes: {ovr_classes}")
+
+    # Resolve OvR flags
+    enable_ovr_cfg, ovr_classes_set = _resolve_ovr_flags(
+        config, enable_ovr, ovr_classes
+    )
+
+    print(f"    enable_ovr_cfg: {enable_ovr_cfg}, ovr_classes_set: {ovr_classes_set}")
+
+    # Load data for evaluation (same settings as training)
     print("Loading data for evaluation...")
     X, y, meta = load_ptbxl_full(
         data_dir=PTBXL_DATA_DIR,
@@ -92,7 +392,7 @@ def main(fold_override=None):
     y = [lbl for i, lbl in enumerate(y) if keep[i]]
     meta = meta.loc[keep].reset_index(drop=True)
 
-    # Encode labels
+    # Encode labels to integers
     le = LabelEncoder()
     y_encoded = le.fit_transform(y)
     y_tensor = torch.tensor(y_encoded).long()
@@ -100,23 +400,17 @@ def main(fold_override=None):
     dataset = TensorDataset(X_tensor, y_tensor)
     dataloader = DataLoader(dataset, batch_size=config.batch_size, shuffle=False)
 
-    # Load best model info from summary
-    # summary_path = OUTPUT_DIR / "results" / f"summary_{config.model}.json"
-    summary_path = OUTPUT_DIR / "results" / f"summary_{extra['tag']}.json"
-    with open(summary_path, "r") as f:
-        summaries = json.load(f)
+    # Load and pick best summary entry (or forced fold)
+    summaries = _read_summary(tag)
+    best = _select_best_entry(summaries, fold_override=fold_override)
 
-    # best = min(summaries, key=lambda d: d["loss"])
+    # Extract model path / fold / epoch from the chosen entry
+    best_model_path = Path(best.get("model_path", ""))
+    if not best_model_path:
+        raise ValueError("Chosen summary entry lacks 'model_path'.")
+    if not best_model_path.exists():
+        raise FileNotFoundError(f"Model weights not found: {best_model_path}")
 
-    if extra["fold"] is not None:
-        matching = [s for s in summaries if s.get("fold") == extra["fold"]]
-        if not matching:
-            raise ValueError(f"No summary entry found for fold {extra['fold']}")
-        best = min(matching, key=lambda d: d["loss"])
-    else:
-        best = min(summaries, key=lambda d: d["loss"])
-
-    best_model_path = Path(best["model_path"])
     best_fold = best.get("fold")
     if fold_override is not None:
         best_fold = fold_override
@@ -124,20 +418,28 @@ def main(fold_override=None):
     best_epoch = best.get("best_epoch")
 
     print(
-        f"Evaluating best model from fold {best_fold if best_fold is not None else 'N/A'} (epoch {best_epoch})"
+        f"Evaluating best model from fold {best_fold if best_fold is not None else 'N/A'} "
+        f"(epoch {best_epoch})"
     )
     print(f"Loading model: {best_model_path.name}")
 
+    # Build & restore the model
+    if config.model not in MODEL_CLASSES:
+        raise ValueError(
+            f"Unknown model '{config.model}'. Add it to ecg_cnn.models.MODEL_CLASSES."
+        )
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model_cls = MODEL_CLASSES[config.model]
     model = model_cls(num_classes=len(FIVE_SUPERCLASSES)).to(device)
     model.load_state_dict(torch.load(best_model_path, map_location=device))
     model.eval()
 
-    # Run evaluation
+    # Inference
     criterion = nn.CrossEntropyLoss()
     total_loss = 0.0
-    all_preds, all_probs, all_targets = [], [], []
+    all_preds: List[int] = []
+    all_probs: List[np.ndarray] = []
+    all_targets: List[int] = []
 
     with torch.no_grad():
         for X_batch, y_batch in dataloader:
@@ -154,7 +456,7 @@ def main(fold_override=None):
             all_probs.extend(probs.cpu().numpy())
             all_targets.extend(y_batch.cpu().numpy())
 
-    avg_loss = total_loss / len(dataset)
+    avg_loss = total_loss / len(dataset) if len(dataset) > 0 else float("nan")
     print(f"Eval loss: {avg_loss:.4f}")
     print(f"Evaluation completed in {(time.time() - t0) / 60:.2f} minutes.")
 
@@ -162,103 +464,9 @@ def main(fold_override=None):
     y_pred = np.array(all_preds, dtype=int)
     y_probs = np.array(all_probs, dtype=np.float32)
 
-    # Try to load history if available
-    train_accs, val_accs, train_loss, val_loss = [], [], [], []
     print(f"best_fold:  {best_fold}")
-    if best_fold is not None:
-        # hist_path = HISTORY_DIR / f"history_fold{best_fold}.json"
-        hist_path = HISTORY_DIR / f"history_{extra['tag']}_fold{best_fold}.json"
-        print(f"history_path: {hist_path}")
-        if hist_path.exists():
-            with open(hist_path, "r") as f:
-                hist = json.load(f)
-            train_accs = hist.get("train_acc", [])
-            val_accs = hist.get("val_acc", [])
-            train_loss = hist.get("train_loss", [])
-            val_loss = hist.get("val_loss", [])
-        else:
-            print(f"(History not found at {hist_path})")
-
-    # Classification Report
-    print("\nClassification Report:")
-    print(
-        classification_report(
-            y_true, y_pred, target_names=FIVE_SUPERCLASSES, zero_division=0
-        )
-    )
-
-    # Confusion Matrix
-    # save_confusion_matrix(
-    #     y_true=y_true.tolist(),
-    #     y_pred=y_pred.tolist(),
-    #     class_names=FIVE_SUPERCLASSES,
-    #     out_folder=OUTPUT_DIR / "plots",
-    #     model=config.model,
-    #     lr=config.lr,
-    #     bs=config.batch_size,
-    #     wd=config.weight_decay,
-    #     epoch=best_epoch,
-    #     prefix="eval",
-    #     fname_metric="confusion_matrix",
-    #     normalize=True,
-    #     fold=(best_fold + 1 if best_fold is not None else None),
-    # )
-
-    # # Precision-Recall Curve (NORM vs ALL)
-    # norm_class = FIVE_SUPERCLASSES.index("NORM")
-    # y_true_binary = (y_true == norm_class).astype(int)
-    # y_probs_binary = y_probs[:, norm_class]
-
-    # save_pr_threshold_curve(
-    #     y_true=y_true_binary,
-    #     y_probs=y_probs_binary,
-    #     out_folder=OUTPUT_DIR / "plots",
-    #     model=config.model,
-    #     lr=config.lr,
-    #     bs=config.batch_size,
-    #     wd=config.weight_decay,
-    #     epoch=best_epoch,
-    #     prefix="eval",
-    #     fname_metric="pr_threshold_curve",
-    #     title="Precision & Recall vs Threshold (NORM vs All)",
-    #     fold=(best_fold + 1 if best_fold is not None else None),
-    # )
-
-    # if val_loss:
-    #     save_plot_curves(
-    #         x_vals=list(range(1, len(val_loss) + 1)),
-    #         y_vals=val_loss,
-    #         x_label="Epoch",
-    #         y_label="Loss",
-    #         title_metric="Validation Loss Curve",
-    #         out_folder=OUTPUT_DIR / "plots",
-    #         model=config.model,
-    #         lr=config.lr,
-    #         bs=config.batch_size,
-    #         wd=config.weight_decay,
-    #         epoch=best_epoch,
-    #         prefix="eval",
-    #         fname_metric="loss",
-    #         fold=(best_fold + 1 if best_fold is not None else None),
-    #     )
-
-    # if val_accs:
-    #     save_plot_curves(
-    #         x_vals=list(range(1, len(val_loss) + 1)),
-    #         y_vals=val_loss,
-    #         x_label="Epoch",
-    #         y_label="Accuracy",
-    #         title_metric="Validation Accuracy Curve",
-    #         out_folder=OUTPUT_DIR / "plots",
-    #         model=config.model,
-    #         lr=config.lr,
-    #         bs=config.batch_size,
-    #         wd=config.weight_decay,
-    #         epoch=best_epoch,
-    #         prefix="eval",
-    #         fname_metric="loss",
-    #         fold=(best_fold + 1 if best_fold is not None else None),
-    #     )
+    print(f"tag:  {tag}")
+    train_accs, val_accs, train_loss, val_loss = _load_history(tag, best_fold)
 
     y_true_ep = [int(x) for x in y_true]
     y_pred_ep = [int(x) for x in y_pred]
@@ -269,28 +477,7 @@ def main(fold_override=None):
     print(f"val_loss: {val_loss}")
     print(f"best_fold: {best_fold}")
 
-    # --- YAML defaults (config is a TrainConfig object, not a dict)
-    enable_ovr_cfg = bool(getattr(config, "plots_enable_ovr", False))
-    ovr_classes_cfg = getattr(config, "plots_ovr_classes", []) or []
-    if not isinstance(ovr_classes_cfg, list):
-        ovr_classes_cfg = []
-
-    _env_enable = os.getenv("ECG_PLOTS_ENABLE_OVR")
-    _env_classes = os.getenv("ECG_PLOTS_OVR_CLASSES")
-
-    if _env_enable is not None:
-        enable_ovr_cfg = _env_enable.strip() in {"1", "true", "True"}
-
-    if _env_classes is not None:
-        # Empty string => enable OvR for all classes (no filter)
-        ovr_classes_cfg = [c.strip() for c in _env_classes.split(",") if c.strip()]
-        # If classes were specified without an explicit enable/disable, implicitly enable
-        if _env_enable is None:
-            enable_ovr_cfg = True
-
-    # Normalize for plot_utils API
-    ovr_classes_set = set(ovr_classes_cfg) if ovr_classes_cfg else None
-
+    # Final composite plots + report
     evaluate_and_plot(
         y_true=y_true_ep,
         y_pred=y_pred_ep,
@@ -317,7 +504,43 @@ def main(fold_override=None):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--fold", type=int, default=None)
+    parser = argparse.ArgumentParser(
+        description="Evaluate the most recent training config (or a forced fold)."
+    )
+    parser.add_argument(
+        "--fold",
+        type=int,
+        default=None,
+        help="Optional 1-based fold index. If omitted, selects the best by lowest loss.",
+    )
+
+    # Enalbe flag viea mutually exclusive group
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--enable_ovr",
+        dest="enable_ovr",
+        action="store_const",
+        const=True,
+        default=None,  # None = no CLI override; defer to config or env
+        help="Enable one-vs-rese plots. Overrides config and env.",
+    )
+    group.add_argument(
+        "--disable_ovr",
+        dest="enable_ovr",
+        action="store_const",
+        const=False,
+        help="Disable one-vs-rest plots. Overrieds config and env.",
+    )
+    parser.add_argument(
+        "--ovr_classes",
+        type=lambda s: [x.strip() for x in s.split(",") if x.strip()],
+        default=None,
+        help="Comma-separated class names for OvR analysis (e.g., 'MI, NORM')."
+        "Implies --enable_ovr unless --disable_ovr is set.",
+    )
     args = parser.parse_args()
-    main(fold_override=args.fold)
+    main(
+        enable_ovr=args.enable_ovr,
+        ovr_classes=args.ovr_classes,
+        fold_override=args.fold,
+    )

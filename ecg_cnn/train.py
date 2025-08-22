@@ -2,66 +2,48 @@
 """
 train.py
 
-Main training entry point for ECG CNN models.
+Main training entry point for ECG CNN models. This calls
+    ecg_cnn/training/trainer/run_training() to do the actual training.
 
 Run with:
     python -m ecg_cnn.train --config configs/baseline.yaml
 
 """
 
-# --------------------------------------------------------------------------
-# Standard Library Imports
-# --------------------------------------------------------------------------
-import random
-import time
-from pathlib import Path
-import yaml
-
-# --------------------------------------------------------------------------
-# Third-Party Imports (alphabetical)
-# --------------------------------------------------------------------------
 import json
 import numpy as np
+import random
+import time
 import torch
-import torch.nn as nn
-import torch.optim as optim
+import yaml
 
 from dataclasses import asdict
-from sklearn.preprocessing import LabelEncoder
-from torch.utils.data import DataLoader, TensorDataset
+from datetime import datetime
+from pathlib import Path
 
-# --------------------------------------------------------------------------
+
+# ------------------------------------------------------------------------------
 # Project Imports (ecg_cnn.* in alphabetical order)
-# --------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 from ecg_cnn.config.config_loader import (
     load_training_config,
     merge_configs,
-    normalize_path_fields,
     load_yaml_as_dict,
-    TrainConfig,
 )
-from ecg_cnn.data.data_utils import (
-    FIVE_SUPERCLASSES,
-    load_ptbxl_full,
-    load_ptbxl_sample,
-)
+
 from ecg_cnn.models.model_utils import ECGConvNet
 from ecg_cnn.paths import (
     DEFAULT_TRAINING_CONFIG,
-    MODELS_DIR,
-    OUTPUT_DIR,
-    PROJECT_ROOT,
-    PTBXL_DATA_DIR,
     RESULTS_DIR,
 )
 from ecg_cnn.training.cli_args import parse_args, override_config_with_args
-from ecg_cnn.training.trainer import train_one_epoch, run_training
+from ecg_cnn.training.trainer import run_training
 from ecg_cnn.utils.grid_utils import is_grid_config, expand_grid
 
 
-# --------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # Globals
-# --------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 
 SEED = 22
 torch.manual_seed(SEED)
@@ -71,28 +53,33 @@ torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 _DATA_CACHE = {}
 
-# --------------------------------------------------------------------------
-# Helper script
-# --------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+# Helpers
+# ------------------------------------------------------------------------------
 
 
-# def get_dataset_cached(cfg):
-#     key = (cfg.sampling_rate, cfg.subsample_frac, bool(cfg.sample_only))
-#     if key not in _DATA_CACHE:
-#         if cfg.sample_only:
-#             ds = load_ptbxl_sample(
-#                 sampling_rate=cfg.sampling_rate, subsample_frac=cfg.subsample_frac
-#             )
-#         else:
-#             ds = load_ptbxl_full(
-#                 sampling_rate=cfg.sampling_rate, subsample_frac=cfg.subsample_frac
-#             )
-#         _DATA_CACHE[key] = ds
-#     return _DATA_CACHE[key]
+def _acc_value(s):
+    """Prefer validation accuracy if present; else fall back to train."""
+    va = s.get("val_accs")
+    if va is None:
+        va = s.get("train_accs")
+    # Guard for weird Nones/NaNs/strings
+    try:
+        return float(va)
+    except Exception:
+        return float("-inf")
+
+
+def _loss_value(s):
+    """Loss already uses val when available in run_training(); just cast safe."""
+    try:
+        return float(s.get("loss", float("inf")))
+    except Exception:
+        return float("inf")
 
 
 # ------------------------------------------------------------------------------
-# Main Training Script
+# Main Training
 # ------------------------------------------------------------------------------
 def main():
     t0 = time.time()
@@ -170,17 +157,51 @@ def main():
         # Add all folds to overall results
         all_summaries.extend(summaries)
 
-    # ----------------------------------------------------------
-    # Select best summary across all configs/folds (after loop)
-    # ----------------------------------------------------------
     if all_summaries:
-        best_summary = min(all_summaries, key=lambda d: d["loss"])
-        print(
-            f"\nBest model: {best_summary['model_path']} (epoch {best_summary['best_epoch']})"
+        # Best by loss (lower is better)
+        best_by_loss = min(all_summaries, key=_loss_value)
+
+        # Best by accuracy (higher is better), prefer val_accs but fallback to train_accs
+        # Filter out entries that have neither
+        candidates_acc = [
+            s
+            for s in all_summaries
+            if s.get("val_accs") is not None or s.get("train_accs") is not None
+        ]
+        best_by_accuracy = (
+            max(candidates_acc, key=_acc_value) if candidates_acc else None
         )
 
-        time_spent = (time.time() - t0) / 60
-        print(f"Elapsed time: {time_spent:.2f} minutes")
+        print(
+            f"\nBest model by loss: {best_by_loss['model_path']} (epoch {best_by_loss['best_epoch']})"
+        )
+        print(f"Best-by-loss summary: {best_by_loss}")
+
+        if best_by_accuracy is not None:
+            print(
+                f"\nBest model by accuracy: {best_by_accuracy['model_path']} (epoch {best_by_accuracy['best_epoch']})"
+            )
+            print(f"Best-by-accuracy summary: {best_by_accuracy}")
+        else:
+            print("\nBest model by accuracy: <none> (no accuracy recorded)")
+
+        # Save a single JSON your other scripts can read directly
+        RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+        best_payload = {
+            "generated_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+            "tag": tag,  # whatever tag you used for this grid run
+            "by_loss": best_by_loss,
+            "by_accuracy": best_by_accuracy,
+            # Optional: keep the entire list for traceability
+            "all_summaries": all_summaries,
+        }
+        best_path = RESULTS_DIR / f"really_the_best_{tag}.json"
+        with open(best_path, "w") as f:
+            json.dump(best_payload, f, indent=2)
+        print(f"Saved best selections to: {best_path}")
+
+    time_spent = (time.time() - t0) / 60
+    print(f"Elapsed time: {time_spent:.2f} minutes")
 
 
 if __name__ == "__main__":

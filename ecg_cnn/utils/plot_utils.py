@@ -918,9 +918,15 @@ def evaluate_and_plot(
     y_probs : list of float or np.ndarray
         Predicted probabilities for the positive class (binary classification).
     fold : int or None, optional
-        Fold number used in cross-validation. Must be a non-negative integer or None.
+        Fold number used in cross-validation. Must be a non-negative integer or
+        None.
     epoch : int or None, optional
         Epoch number used for this plot (e.g., best epoch).
+    enable_ovr : bool or None, optional
+        Enables one-versus-rest plots if set to true. Default is None
+    ovr_classes : set[str] or None, optional
+        Set of class labels to do one-versus-rest plots for (e.g., {"NORM",
+        "MI", "STTC"})
 
     Raises
     ------

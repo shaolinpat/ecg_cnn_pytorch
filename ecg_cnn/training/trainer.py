@@ -16,7 +16,6 @@ from ecg_cnn.data.data_utils import (
     load_ptbxl_sample,
     load_ptbxl_full,
 )
-from ecg_cnn.data.dataset_cache import get_dataset_cached
 from ecg_cnn.models import model_utils
 from ecg_cnn.paths import HISTORY_DIR, MODELS_DIR, PTBXL_DATA_DIR
 from ecg_cnn.training.training_utils import compute_class_weights
@@ -196,20 +195,23 @@ def run_training(
     config: TrainConfig, fold_idx: Optional[int] = None, tag: Optional[str] = None
 ) -> dict:
     """
-    Run training for one configuration. Supports optional fold-based splitting and
-    config-specific filename tagging to prevent overwrites during grid search.
+    Run training for one configuration. Supports optional fold-based splitting
+    and config-specific filename tagging to prevent overwrites during grid
+    search.
 
     Parameters
     ----------
     config : TrainConfig
-        Parsed training configuration including model, hyperparams, and fold info.
+        Parsed training configuration including model, hyperparams, and fold
+        info.
 
     fold_idx : int, optional
         Fold index for cross-validation. If None, no fold split is used.
 
     tag : str, optional
-        Unique identifier for the current config (e.g., model_lr_bs_wd) to disambiguate
-        saved model and history files. Required to prevent filename collisions.
+        Unique identifier for the current config (e.g., model_lr_bs_wd) to
+        disambiguate saved model and history files. Required to prevent filename
+        collisions.
 
     Returns
     -------
@@ -221,9 +223,10 @@ def run_training(
     ValueError
         If any argument has an invalid value or type.
     """
-    # --------------------------------------
+    # --------------------------------------------------------------------------
     # Input validation (duck-typed to support test doubles)
-    # --------------------------------------
+    # --------------------------------------------------------------------------
+
     # First: strict type check so tests matching "TrainConfig" pass
     if not isinstance(config, TrainConfig):
         raise TypeError("cfg must be TrainConfig")
@@ -263,16 +266,13 @@ def run_training(
     if tag is None:
         raise ValueError("Missing tag — must be provided to disambiguate file outputs.")
 
-    # --------------------------------------
+    # --------------------------------------------------------------------------
     # Start training
-    # --------------------------------------
+    # --------------------------------------------------------------------------
 
     t0 = time.time()
     SEED = 22
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    # inside run_training(...), replace the current data load + drop-unknowns with:
-    # X, y, meta = get_dataset_cached(config)
 
     # Load and preprocess data
     data_dir = Path(config.data_dir) if config.data_dir else PTBXL_DATA_DIR
@@ -300,18 +300,13 @@ def run_training(
     X_tensor = torch.tensor(X).float()
     y_tensor = torch.tensor(y_encoded).long()
 
-    # --------------------------------------
+    # --------------------------------------------------------------------------
     # Fold-based split (optional)
-    # --------------------------------------
+    # --------------------------------------------------------------------------
     if fold_idx is not None:
-        # if config.n_folds < 2:
-        #     raise ValueError("n_folds must be >= 2 if fold_idx is provided.")
 
         skf = StratifiedKFold(n_splits=config.n_folds, shuffle=True, random_state=SEED)
         splits = list(skf.split(X_tensor, y_tensor))
-
-        # if not (0 <= fold_idx < config.n_folds):
-        #     raise ValueError(f"Fold index out of range: {fold_idx}")
 
         train_idx, val_idx = splits[fold_idx]
         train_dataset = TensorDataset(X_tensor[train_idx], y_tensor[train_idx])
@@ -330,9 +325,9 @@ def run_training(
         val_dataloader = None
         print(f"No folds: {len(dataset)} total samples")
 
-    # --------------------------------------
+    # --------------------------------------------------------------------------
     # Model and optimizer
-    # --------------------------------------
+    # --------------------------------------------------------------------------
     model_cls = getattr(model_utils, config.model, None)
     if model_cls is None:
         raise ValueError(f"Unknown model name: {config.model}")
@@ -341,13 +336,7 @@ def run_training(
     optimizer = torch.optim.Adam(
         model.parameters(), lr=config.lr, weight_decay=config.weight_decay
     )
-    # criterion = nn.CrossEntropyLoss()
-    # y_train_np = train_dataset.tensors[1].numpy()
-    # num_classes = len(np.unique(y_train_np))
-    # class_weights = compute_class_weights(y_train_np, num_classes)
-    # criterion = nn.CrossEntropyLoss(weight=class_weights)
 
-    # criterion = nn.CrossEntropyLoss()
     if fold_idx is not None:
         y_src = y_tensor[train_idx]
     else:
@@ -370,10 +359,6 @@ def run_training(
     for epoch in range(config.n_epochs):
         print(f"Epoch {epoch + 1}/{config.n_epochs}")
 
-        # loss = train_one_epoch(model, dataloader, optimizer, criterion, device)
-
-        # print(f"Loss: {loss:.4f}")
-
         train_loss, train_acc = train_one_epoch(
             model, dataloader, optimizer, criterion, device
         )
@@ -392,8 +377,11 @@ def run_training(
         history["val_loss"].append(val_loss)
         history["val_acc"].append(val_acc)
 
-        if config.save_best and train_loss < best_loss:
-            best_loss = train_loss
+        # Monitor validation loss when available
+        monitored = val_loss if val_dataloader else train_loss
+        if config.save_best and monitored < best_loss:
+
+            best_loss = monitored
             best_epoch = epoch + 1
             MODELS_DIR.mkdir(parents=True, exist_ok=True)
             fname = (
@@ -413,10 +401,10 @@ def run_training(
             json.dump(history, f, indent=2)
         print(f"Saved training history to: {history_path}")
 
-    elapsed = (time.time() - t0) / 60
+    elapsed_min = (time.time() - t0) / 60
     summary = {
         "loss": best_loss,
-        "elapsed_min": elapsed,
+        "elapsed_min": elapsed_min,
         "fold": fold_idx + 1 if fold_idx is not None else None,
         "model": model.__class__.__name__,
         "model_path": str(model_path) if config.save_best else None,

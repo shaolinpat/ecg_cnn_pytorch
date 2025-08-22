@@ -154,7 +154,7 @@ def test_build_full_X_y_smoke(tmp_path, patch_paths):
     scp.write_text("dummy,desc\n")
 
     # Use fixture-patched PTB-XL root; skip if sample record files are absent
-    _, _, _, _, _, ptb_dir = patch_paths
+    _, _, _, _, _, _, ptb_dir = patch_paths
     rel = Path("records100/10000/10001_lr")
     hea = ptb_dir / f"{rel}.hea"
     dat = ptb_dir / f"{rel}.dat"

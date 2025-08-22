@@ -1,12 +1,12 @@
-model: [ECGInceptionNet, ECGResNet, ECGConvNet]   # Name of the model classes (must match a model in
-                                                  #   models/model_utils.py)
+model: [ECGResNet]       # Name of the model class (must match a model in
+                         #   models/model_utils.py)
 
 # ------------------------------------------------------------------------------
 # Training Hyperparameters
 # ------------------------------------------------------------------------------
-lr: [0.001, 0.0005, 0.0001]         # Learning rate for optimizer (e.g., Adam)
-batch_size: [32, 64]                # Number of samples per gradient update
-weight_decay: [0.0, 0.0001, 0.001]  # L2 regularization strength
+lr: [0.001, 0.0005]                 # Learning rate for optimizer (e.g., Adam)
+batch_size: [64]                    # Number of samples per gradient update
+weight_decay: [0.0001, 0.001]       # L2 regularization strength
 n_epochs: 5                         # Total number of training epochs
 save_best: true                     # If true, save the model with the lowest
                                     #   val loss, otherwise, don't save the 
