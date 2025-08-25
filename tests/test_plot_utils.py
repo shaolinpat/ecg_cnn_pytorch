@@ -25,12 +25,14 @@ Notes
 
 from __future__ import annotations
 
-import numpy as np
 import io
+import numpy as np
+import pandas as pd
 import pytest
 
-from pathlib import Path
 from contextlib import redirect_stdout
+from pathlib import Path
+from sklearn.metrics import brier_score_loss
 
 from ecg_cnn.utils.plot_utils import (
     _build_plot_title,
@@ -41,6 +43,11 @@ from ecg_cnn.utils.plot_utils import (
     save_pr_curve,
     save_roc_curve,
     save_classification_report,
+    save_calibration_curve,
+    save_threshold_sweep_table,
+    save_error_tables,
+    save_confidence_histogram,
+    save_confidence_histogram_split,
     evaluate_and_plot,
 )
 
@@ -816,6 +823,1180 @@ def test_save_classification_report_rejects_non_string_title(tmp_path: Path):
 
 
 # ------------------------------------------------------------------------------
+# save_calibration_curve
+# ------------------------------------------------------------------------------
+
+
+def test_save_calibration_curve_bad_out_folder():
+    y_true = [0, 1, 0, 1, 1, 0]
+    y_probs = [0.2, 0.8, 0.3, 0.7, 0.9, 0.1]
+    n_bins = 2.0
+    with pytest.raises(
+        ValueError, match=r"^out_folder must be a string or pathlib.Path."
+    ):
+        save_calibration_curve(
+            y_true=y_true,
+            y_probs=y_probs,
+            out_folder=23,  # bad
+            model="ECGConvNet",
+            lr=0.001,
+            bs=64,
+            wd=0.0005,
+            prefix="final",
+            fname_metric="metric",
+            n_bins=n_bins,
+            fold=2,
+            epoch=3,
+            title="Calibration Curve",
+        )
+
+
+def test_save_calibration_curve_n_bins_not_integer(tmp_path: Path):
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    y_true = [0, 1, 0, 1, 1, 0]
+    y_probs = [0.2, 0.8, 0.3, 0.7, 0.9, 0.1]
+    n_bins = 2.0
+    with pytest.raises(ValueError, match=r"^n_bins must be an integer >= 2."):
+        save_calibration_curve(
+            y_true,
+            y_probs,
+            out_dir,
+            "ECGConvNet",
+            0.001,
+            64,
+            0.0005,
+            "final",
+            "metric",
+            n_bins=n_bins,
+        )
+
+
+def test_save_calibration_curve_n_bins_not_integer(tmp_path: Path):
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    y_true = [0, 1, 0, 1, 1, 0]
+    y_probs = [0.2, 0.8, 0.3, 0.7, 0.9, 0.1]
+    n_bins = 2.0
+    with pytest.raises(ValueError, match=r"^n_bins must be an integer >= 2."):
+        save_calibration_curve(
+            y_true,
+            y_probs,
+            out_dir,
+            "ECGConvNet",
+            0.001,
+            64,
+            0.0005,
+            "final",
+            "metric",
+            n_bins=n_bins,
+        )
+
+
+def test_save_calibration_curve_n_bins_too_small(tmp_path):
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    y_true = [0, 1, 0, 1, 1, 0]
+    y_probs = [0.2, 0.8, 0.3, 0.7, 0.9, 0.1]
+    n_bins = 1
+    with pytest.raises(ValueError, match=r"^n_bins must be an integer >= 2."):
+        save_calibration_curve(
+            y_true,
+            y_probs,
+            out_dir,
+            "ECGConvNet",
+            0.001,
+            64,
+            0.0005,
+            "final",
+            "metric",
+            n_bins=n_bins,
+        )
+
+
+def test_save_calibration_curve_multiclass_confidence(tmp_path: Path):
+    """
+    Verifies the multiclass branch:
+      - y_probs is 2D with K>1 classes
+      - reduction uses argmax==y_true as targets and max prob as confidence
+      - returned Brier score matches the reduction
+      - PNG is written to disk
+    """
+    # Multiclass ground truth and probabilities (N=6, K=3)
+    y_true = np.array([0, 1, 2, 1, 0, 2], dtype=int)
+    y_probs = np.array(
+        [
+            [0.90, 0.05, 0.05],  # correct, conf=0.90
+            [0.10, 0.80, 0.10],  # correct, conf=0.80
+            [0.20, 0.20, 0.60],  # correct, conf=0.60
+            [0.20, 0.50, 0.30],  # correct, conf=0.50 (ties not present here)
+            [
+                0.40,
+                0.40,
+                0.20,
+            ],  # incorrect (argmax=0 or 1 tie avoided; we keep unique argmax rows)
+            [0.30, 0.20, 0.50],  # correct, conf=0.50
+        ],
+        dtype=float,
+    )
+
+    # Compute expected reduction exactly as in save_calibration_curve
+    y_pred = y_probs.argmax(axis=1)
+    conf = y_probs.max(axis=1)
+    targets = (y_pred == y_true).astype(int)
+    expected_brier = brier_score_loss(targets, conf)
+
+    # Call the function under test (uses the multiclass reduction branch)
+    png_path, brier = save_calibration_curve(
+        y_true=y_true,
+        y_probs=y_probs,
+        out_folder=tmp_path,
+        model="ECGConvNet",
+        lr=0.001,
+        bs=64,
+        wd=0.0005,
+        prefix="final",
+        fname_metric="calibration",
+        n_bins=5,  # any >=2; not part of the Brier computation
+        fold=None,
+        epoch=3,
+        title="Calibration Curve",
+    )
+
+    # Assertions
+    assert png_path.exists(), "Calibration PNG was not created."
+    # Use approx to avoid floating noise; the values should match exactly with same inputs
+    assert brier == pytest.approx(expected_brier, rel=0, abs=1e-12)
+    # Sanity range
+    assert 0.0 <= brier <= 1.0
+
+
+def test_save_calibration_curve_binary(tmp_path: Path):
+    y_true = [0, 1, 0, 1, 1, 0]
+    y_probs = [0.2, 0.8, 0.3, 0.7, 0.9, 0.1]
+    p, b = save_calibration_curve(
+        y_true, y_probs, tmp_path, "ECGConvNet", 0.001, 64, 0.0005, "final", "metric"
+    )
+    assert p.exists()
+    assert 0.0 <= b <= 1.0
+
+
+# ------------------------------------------------------------------------------
+# save_threshold_sweep_table
+# ------------------------------------------------------------------------------
+
+
+def test_save_threshold_sweep_table_binary_1d_probs(tmp_path: Path) -> None:
+    out_dir = tmp_path / "reports"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    y_true = np.array([0, 1, 0, 1, 1, 0], dtype=int)
+    # one probability per sample for positive class
+    y_probs = np.array([0.10, 0.80, 0.25, 0.70, 0.95, 0.30], dtype=float)
+
+    out_csv = save_threshold_sweep_table(
+        y_true=y_true,
+        y_probs=y_probs,
+        out_folder=out_dir,
+        model="M",
+        lr=1e-3,
+        bs=8,
+        wd=0.0,
+        prefix="run",
+        thresholds=[0.50, 0.60, 0.70],
+        average="binary",
+        fold=1,
+        epoch=1,
+    )
+
+    assert out_csv.exists()
+    df = pd.read_csv(out_csv)
+    assert set(df.columns) == {"threshold", "precision", "recall", "f1", "accuracy"}
+    assert df.shape[0] == 3
+    # sanity: all metrics within [0,1]
+    for col in ["precision", "recall", "f1", "accuracy"]:
+        assert (df[col].between(0.0, 1.0)).all()
+
+
+def test_save_threshold_sweep_table_binary_2d_probs_uses_positive_column(
+    tmp_path: Path,
+) -> None:
+    out_dir = tmp_path / "reports"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    y_true = np.array([0, 1, 0, 1], dtype=int)
+    # probs[:, 0] = P(neg), probs[:, 1] = P(pos)
+    y_probs = np.array(
+        [
+            [0.80, 0.20],  # true 0
+            [0.30, 0.70],  # true 1
+            [0.90, 0.10],  # true 0
+            [0.40, 0.60],  # true 1
+        ],
+        dtype=float,
+    )
+
+    out_csv = save_threshold_sweep_table(
+        y_true=y_true,
+        y_probs=y_probs,  # function should slice [:, 1]
+        out_folder=out_dir,
+        model="M",
+        lr=1e-3,
+        bs=8,
+        wd=0.0,
+        prefix="run",
+        thresholds=[0.60],  # with col 1 this yields predictions [0,1,0,1]
+        average="binary",
+        fold=1,
+        epoch=1,
+    )
+
+    df = pd.read_csv(out_csv)
+    assert set(df.columns) == {"threshold", "precision", "recall", "f1", "accuracy"}
+    assert df.shape[0] == 1
+    # At t=0.60, predicted = [0,1,0,1] -> perfect metrics
+    row = df.iloc[0]
+    assert row["threshold"] == 0.60
+    assert row["precision"] == 1.0
+    assert row["recall"] == 1.0
+    assert row["f1"] == 1.0
+    assert row["accuracy"] == 1.0
+
+
+def test_save_threshold_sweep_table_multiclass_macro_invariant_over_thresholds(
+    tmp_path: Path,
+) -> None:
+    out_dir = tmp_path / "reports"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    y_true = np.array([0, 1, 2, 1, 0, 2], dtype=int)
+    y_probs = np.array(
+        [
+            [0.70, 0.20, 0.10],
+            [0.10, 0.80, 0.10],
+            [0.10, 0.10, 0.80],
+            [0.20, 0.60, 0.20],
+            [0.65, 0.25, 0.10],
+            [0.10, 0.20, 0.70],
+        ],
+        dtype=float,
+    )
+
+    thresholds = [0.10, 0.50, 0.90]  # macro path ignores threshold (uses argmax)
+    out_csv = save_threshold_sweep_table(
+        y_true=y_true,
+        y_probs=y_probs,
+        out_folder=out_dir,
+        model="M",
+        lr=1e-3,
+        bs=8,
+        wd=0.0,
+        prefix="run",
+        thresholds=thresholds,
+        average="macro",
+        fold=1,
+        epoch=1,
+    )
+
+    df = pd.read_csv(out_csv)
+    assert set(df.columns) == {"threshold", "precision", "recall", "f1", "accuracy"}
+    assert list(df["threshold"]) == thresholds
+    # Metrics should be identical across rows since macro path uses argmax
+    for col in ["precision", "recall", "f1", "accuracy"]:
+        assert df[col].nunique() == 1
+        assert (df[col].between(0.0, 1.0)).all()
+
+
+def test_save_threshold_sweep_average_not_binary_or_macro(
+    tmp_path: Path,
+) -> None:
+    out_dir = tmp_path / "reports"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    y_true = np.array([0, 1, 2, 1, 0, 2], dtype=int)
+    y_probs = np.array(
+        [
+            [0.70, 0.20, 0.10],
+            [0.10, 0.80, 0.10],
+            [0.10, 0.10, 0.80],
+            [0.20, 0.60, 0.20],
+            [0.65, 0.25, 0.10],
+            [0.10, 0.20, 0.70],
+        ],
+        dtype=float,
+    )
+
+    thresholds = [0.10, 0.50, 0.90]  # macro path ignores threshold (uses argmax)
+
+    with pytest.raises(
+        ValueError,
+        match=r'^average must be "binary" or "macro".',
+    ):
+        save_threshold_sweep_table(
+            y_true=y_true,
+            y_probs=y_probs,
+            out_folder=out_dir,
+            model="M",
+            lr=1e-3,
+            bs=8,
+            wd=0.0,
+            prefix="run",
+            thresholds=thresholds,
+            average="soup",
+            fold=1,
+            epoch=1,
+        )
+
+
+def test_save_threshold_sweep_table_default_grid_0_to_1_step_001(
+    tmp_path: Path,
+) -> None:
+    out_dir = tmp_path / "reports"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    y_true = np.array([0, 1, 0, 1, 1, 0], dtype=int)
+    y_probs = np.array([0.10, 0.80, 0.25, 0.70, 0.95, 0.30], dtype=float)
+
+    out_csv = save_threshold_sweep_table(
+        y_true=y_true,
+        y_probs=y_probs,
+        out_folder=out_dir,
+        model="M",
+        lr=1e-3,
+        bs=8,
+        wd=0.0,
+        prefix="run",
+        thresholds=None,
+        average="binary",
+        fold=1,
+        epoch=1,
+    )
+
+    df = pd.read_csv(out_csv)
+    vals = df["threshold"].to_numpy()
+    assert len(vals) == 101
+    assert np.isclose(vals[0], 0.00)
+    assert np.isclose(vals[-1], 1.00)
+    diffs = np.diff(vals)
+    assert np.allclose(diffs, 0.01)
+
+
+def test_save_threshold_sweep_table_rejects_non_iterable(tmp_path: Path) -> None:
+    out_dir = tmp_path / "reports"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    y_true = np.array([0, 1, 0, 1], dtype=int)
+    y_probs = np.array([0.2, 0.8, 0.1, 0.9], dtype=float)
+
+    with pytest.raises(
+        ValueError, match=r"^thresholds must be an iterable of floats in \[0.0, 1.0\]."
+    ):
+        save_threshold_sweep_table(
+            y_true=y_true,
+            y_probs=y_probs,
+            out_folder=out_dir,
+            model="M",
+            lr=1e-3,
+            bs=8,
+            wd=0.0,
+            prefix="run",
+            thresholds=0.5,  # not iterable
+            average="binary",
+            fold=1,
+            epoch=1,
+        )
+
+
+def test_save_threshold_sweep_table_rejects_non_numeric_entry(tmp_path: Path) -> None:
+    out_dir = tmp_path / "reports"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    y_true = np.array([0, 1, 0, 1], dtype=int)
+    y_probs = np.array([0.2, 0.8, 0.1, 0.9], dtype=float)
+
+    with pytest.raises(
+        ValueError, match=r"^All thresholds must be numeric values in \[0.0, 1.0\]."
+    ):
+        save_threshold_sweep_table(
+            y_true=y_true,
+            y_probs=y_probs,
+            out_folder=out_dir,
+            model="M",
+            lr=1e-3,
+            bs=8,
+            wd=0.0,
+            prefix="run",
+            thresholds=["a", 0.5],  # bad entry
+            average="binary",
+            fold=1,
+            epoch=1,
+        )
+
+
+def test_save_threshold_sweep_table_rejects_out_of_range_values(tmp_path: Path) -> None:
+    out_dir = tmp_path / "reports"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    y_true = np.array([0, 1, 0, 1], dtype=int)
+    y_probs = np.array([0.2, 0.8, 0.1, 0.9], dtype=float)
+
+    with pytest.raises(ValueError, match=r"^All thresholds must be in \[0.0, 1.0\]."):
+        save_threshold_sweep_table(
+            y_true=y_true,
+            y_probs=y_probs,
+            out_folder=out_dir,
+            model="M",
+            lr=1e-3,
+            bs=8,
+            wd=0.0,
+            prefix="run",
+            thresholds=[-0.1, 0.5],  # too low
+            average="binary",
+            fold=1,
+            epoch=1,
+        )
+
+    with pytest.raises(ValueError, match=r"^All thresholds must be in \[0.0, 1.0\]."):
+        save_threshold_sweep_table(
+            y_true=y_true,
+            y_probs=y_probs,
+            out_folder=out_dir,
+            model="M",
+            lr=1e-3,
+            bs=8,
+            wd=0.0,
+            prefix="run",
+            thresholds=[0.5, 1.1],  # too high
+            average="binary",
+            fold=1,
+            epoch=1,
+        )
+
+
+def test_save_threshold_sweep_table_accepts_mixed_numeric_and_casts_to_float(
+    tmp_path: Path,
+) -> None:
+    out_dir = tmp_path / "reports"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    y_true = np.array([0, 1, 0, 1], dtype=int)
+    y_probs = np.array([0.2, 0.8, 0.1, 0.9], dtype=float)
+
+    given = [0, 0.25, np.float64(0.5), 0.75, 1]
+    out_csv = save_threshold_sweep_table(
+        y_true=y_true,
+        y_probs=y_probs,
+        out_folder=out_dir,
+        model="M",
+        lr=1e-3,
+        bs=8,
+        wd=0.0,
+        prefix="run",
+        thresholds=given,
+        average="binary",
+        fold=1,
+        epoch=1,
+    )
+
+    df = pd.read_csv(out_csv)
+    got = df["threshold"].tolist()
+    assert got == [float(x) for x in given]
+
+
+def test_save_threshold_sweep_table_binary_path_runs_for_true_binary(
+    tmp_path: Path,
+) -> None:
+    out_dir = tmp_path / "reports"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # True binary: labels {0,1}, 1-D probabilities
+    y_true = np.array([0, 1, 0, 1], dtype=int)
+    y_probs = np.array([0.1, 0.9, 0.2, 0.8], dtype=float)
+
+    out_csv = save_threshold_sweep_table(
+        y_true=y_true,
+        y_probs=y_probs,
+        out_folder=out_dir,
+        model="M",
+        lr=1e-3,
+        bs=4,
+        wd=0.0,
+        prefix="bin",
+        thresholds=[0.5],
+        average="binary",
+    )
+
+    df = pd.read_csv(out_csv)
+    assert df.shape[0] == 1
+    # With threshold 0.5, y_pred = [0,1,0,1] so perfect metrics
+    row = df.iloc[0]
+    assert row["precision"] == 1.0
+    assert row["recall"] == 1.0
+    assert row["f1"] == 1.0
+    assert row["accuracy"] == 1.0
+
+
+def test_save_threshold_sweep_table_ovr_branch_for_multiclass_binary_average(
+    tmp_path: Path,
+) -> None:
+    out_dir = tmp_path / "reports"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Multiclass labels {0,1,2}, 2-D probabilities for 3 classes
+    y_true = np.array([0, 1, 2, 1], dtype=int)
+    y_probs = np.array(
+        [
+            [0.7, 0.2, 0.1],  # true 0
+            [0.1, 0.8, 0.1],  # true 1
+            [0.2, 0.2, 0.6],  # true 2
+            [0.2, 0.7, 0.1],  # true 1
+        ],
+        dtype=float,
+    )
+
+    # average="binary" triggers OvR branch, treating class 1 as positive
+    out_csv = save_threshold_sweep_table(
+        y_true=y_true,
+        y_probs=y_probs,
+        out_folder=out_dir,
+        model="M",
+        lr=1e-3,
+        bs=4,
+        wd=0.0,
+        prefix="ovr",
+        thresholds=[0.5],
+        average="binary",
+    )
+
+    df = pd.read_csv(out_csv)
+    assert df.shape[0] == 1
+    # With t=0.5, for class 1 vs rest, predictions for [0,1,2,1] are [0,1,0,1] -> perfect
+    row = df.iloc[0]
+    assert row["precision"] == 1.0
+    assert row["recall"] == 1.0
+    assert row["f1"] == 1.0
+    assert row["accuracy"] == 1.0
+
+
+def test_save_threshold_sweep_table_rejects_non_path_out_folder(tmp_path: Path) -> None:
+    y_true = np.array([0, 1, 0, 1], dtype=int)
+    y_probs = np.array([0.2, 0.8, 0.1, 0.9], dtype=float)
+
+    # out_folder is an int here, should raise
+    with pytest.raises(
+        ValueError, match=r"^out_folder must be a string or pathlib.Path."
+    ):
+        save_threshold_sweep_table(
+            y_true=y_true,
+            y_probs=y_probs,
+            out_folder=123,  # invalid type
+            model="M",
+            lr=1e-3,
+            bs=8,
+            wd=0.0,
+            prefix="bad",
+            thresholds=[0.5],
+            average="binary",
+            fold=1,
+            epoch=1,
+        )
+
+
+def test_save_threshold_sweep_table_rejects_non_1d_probs_in_binary_path(
+    tmp_path: Path,
+) -> None:
+    out_dir = tmp_path / "reports"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Binary labels
+    y_true = np.array([0, 1, 0, 1], dtype=int)
+    # Bad: 3-column probs (cannot be auto-sliced to 1-D)
+    y_probs = np.array(
+        [
+            [0.7, 0.2, 0.1],
+            [0.3, 0.6, 0.1],
+            [0.8, 0.1, 0.1],
+            [0.2, 0.7, 0.1],
+        ],
+        dtype=float,
+    )
+
+    with pytest.raises(ValueError, match=r"^Binary path expects 1-D y_probs"):
+        save_threshold_sweep_table(
+            y_true=y_true,
+            y_probs=y_probs,
+            out_folder=out_dir,
+            model="M",
+            lr=1e-3,
+            bs=4,
+            wd=0.0,
+            prefix="badbin",
+            thresholds=[0.5],
+            average="binary",  # forces binary path even though probs are 2-D
+            fold=1,
+            epoch=1,
+        )
+
+
+# ------------------------------------------------------------------------------
+# save_error_tables
+# ------------------------------------------------------------------------------
+
+
+def test_save_error_tables_binary_1d_outputs_and_sorted_by_margin(
+    tmp_path: Path,
+) -> None:
+    out_dir = tmp_path / "reports"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Binary labels and 1-D probs
+    y_true = np.array([0, 1, 1, 0, 1], dtype=int)
+    # Threshold 0.5 -> preds = [0,1,0,1,1]
+    # FN at idx=2 (true=1, prob=0.4); FP at idx=3 (true=0, prob=0.7)
+    y_probs = np.array([0.1, 0.8, 0.4, 0.7, 0.9], dtype=float)
+
+    fn_path, fp_path = save_error_tables(
+        y_true=y_true,
+        y_probs=y_probs,
+        out_folder=out_dir,
+        model="M",
+        lr=1e-3,
+        bs=8,
+        wd=0.0,
+        prefix="run",
+        threshold=0.5,
+        top_k=50,
+        fold=1,
+        epoch=1,
+    )
+
+    assert fn_path is not None and fp_path is not None
+    assert fn_path.exists() and fp_path.exists()
+
+    df_fn = pd.read_csv(fn_path)
+    df_fp = pd.read_csv(fp_path)
+
+    # Column schema
+    assert list(df_fn.columns) == ["index", "y_true", "y_prob_pos", "margin"]
+    assert list(df_fp.columns) == ["index", "y_true", "y_prob_pos", "margin"]
+
+    # Margins sorted ascending
+    assert (df_fn["margin"].values == np.sort(df_fn["margin"].values)).all()
+    assert (df_fp["margin"].values == np.sort(df_fp["margin"].values)).all()
+
+    # Expected one FN (idx=2) and one FP (idx=3)
+    assert set(df_fn["index"].tolist()) == {2}
+    assert set(df_fp["index"].tolist()) == {3}
+
+    # Sanity on values
+    assert float(df_fn.loc[df_fn["index"] == 2, "y_prob_pos"].iloc[0]) == 0.4
+    assert float(df_fp.loc[df_fp["index"] == 3, "y_prob_pos"].iloc[0]) == 0.7
+
+
+def test_save_error_tables_binary_2d_probs_autoslices_positive_column(
+    tmp_path: Path,
+) -> None:
+    out_dir = tmp_path / "reports"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    y_true = np.array([0, 1, 1, 0], dtype=int)
+    # probs[:,1] is positive-class prob; threshold 0.5 -> preds [0,1,0,1]
+    y_probs_2d = np.array(
+        [
+            [0.9, 0.1],  # true 0 -> TN
+            [0.2, 0.8],  # true 1 -> TP
+            [0.6, 0.4],  # true 1 -> FN (pos prob < 0.5)
+            [0.3, 0.7],  # true 0 -> FP (pos prob >= 0.5)
+        ],
+        dtype=float,
+    )
+
+    fn_path, fp_path = save_error_tables(
+        y_true=y_true,
+        y_probs=y_probs_2d,  # should auto-slice [:, 1]
+        out_folder=out_dir,
+        model="M",
+        lr=1e-3,
+        bs=8,
+        wd=0.0,
+        prefix="run",
+        threshold=0.5,
+        top_k=10,
+    )
+
+    df_fn = pd.read_csv(fn_path)
+    df_fp = pd.read_csv(fp_path)
+
+    # FN should include index 2; FP should include index 3
+    assert 2 in df_fn["index"].tolist()
+    assert 3 in df_fp["index"].tolist()
+
+
+def test_save_error_tables_skips_on_multiclass_labels(tmp_path: Path, capsys) -> None:
+    out_dir = tmp_path / "reports"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Multiclass labels (three classes)
+    y_true = np.array([0, 1, 2, 1], dtype=int)
+    y_probs = np.array([0.2, 0.8, 0.1, 0.7], dtype=float)
+
+    fn_path, fp_path = save_error_tables(
+        y_true=y_true,
+        y_probs=y_probs,
+        out_folder=out_dir,
+        model="M",
+        lr=1e-3,
+        bs=8,
+        wd=0.0,
+        prefix="run",
+        threshold=0.5,
+        top_k=10,
+    )
+
+    out = capsys.readouterr().out
+    assert "Skipping error tables — expected binary labels." in out
+    assert fn_path is None and fp_path is None
+
+
+def test_save_error_tables_rejects_bad_out_folder_type(tmp_path: Path) -> None:
+    y_true = np.array([0, 1, 0, 1], dtype=int)
+    y_probs = np.array([0.2, 0.8, 0.1, 0.9], dtype=float)
+
+    with pytest.raises(
+        ValueError, match=r"^out_folder must be a string or pathlib.Path."
+    ):
+        save_error_tables(
+            y_true=y_true,
+            y_probs=y_probs,
+            out_folder=123,  # invalid
+            model="M",
+            lr=1e-3,
+            bs=8,
+            wd=0.0,
+            prefix="run",
+        )
+
+
+def test_save_error_tables_rejects_bad_threshold_and_topk(tmp_path: Path) -> None:
+    out_dir = tmp_path / "reports"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    y_true = np.array([0, 1, 0, 1], dtype=int)
+    y_probs = np.array([0.2, 0.8, 0.1, 0.9], dtype=float)
+
+    for bad_thr in [-0.1, 1.1, "x"]:
+        with pytest.raises(
+            ValueError, match=r"^threshold must be a numeric value in \[0.0, 1.0\]"
+        ):
+            save_error_tables(
+                y_true=y_true,
+                y_probs=y_probs,
+                out_folder=out_dir,
+                model="M",
+                lr=1e-3,
+                bs=8,
+                wd=0.0,
+                prefix="run",
+                threshold=bad_thr,  # invalid
+            )
+
+    for bad_k in [0, -1, 1.5]:
+        with pytest.raises(ValueError, match=r"^top_k must be a positive integer."):
+            save_error_tables(
+                y_true=y_true,
+                y_probs=y_probs,
+                out_folder=out_dir,
+                model="M",
+                lr=1e-3,
+                bs=8,
+                wd=0.0,
+                prefix="run",
+                top_k=bad_k,  # invalid
+            )
+
+
+def test_save_error_tables_topk_limiting_and_margin_order(tmp_path: Path) -> None:
+    out_dir = tmp_path / "reports"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Construct multiple FNs/FPs to test top_k limiting and order
+    y_true = np.array([1, 1, 1, 0, 0, 0, 1, 0], dtype=int)
+    y_probs = np.array([0.49, 0.2, 0.8, 0.51, 0.6, 0.1, 0.45, 0.55], dtype=float)
+    # thr=0.5 -> FNs at idx 0 (margin .01), 1 (.3), 6 (.05)  → sorted by margin: 0,6,1
+    #            FPs at idx 3 (.01), 4 (.1), 7 (.05)         → sorted by margin: 3,7,4
+
+    fn_path, fp_path = save_error_tables(
+        y_true=y_true,
+        y_probs=y_probs,
+        out_folder=out_dir,
+        model="M",
+        lr=1e-3,
+        bs=8,
+        wd=0.0,
+        prefix="run",
+        threshold=0.5,
+        top_k=2,  # limit to top-2 closest cases
+    )
+
+    df_fn = pd.read_csv(fn_path)
+    df_fp = pd.read_csv(fp_path)
+
+    # Check limiting
+    assert len(df_fn) == 2
+    assert len(df_fp) == 2
+
+    # Check the order by smallest margin first
+    assert df_fn["index"].tolist() == [0, 6]  # margins .01, .05
+    assert df_fp["index"].tolist() == [3, 7]  # margins .01, .05
+
+
+def test_save_error_tables_skips_when_probs_not_1d(tmp_path: Path, capsys) -> None:
+    out_dir = tmp_path / "reports"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Valid binary labels
+    y_true = np.array([0, 1, 0, 1], dtype=int)
+    # Bad probs: shape (N,3) → not 1D, not 2-col binary
+    y_probs = np.array(
+        [
+            [0.1, 0.2, 0.7],
+            [0.8, 0.1, 0.1],
+            [0.3, 0.3, 0.4],
+            [0.6, 0.2, 0.2],
+        ],
+        dtype=float,
+    )
+
+    fn_path, fp_path = save_error_tables(
+        y_true=y_true,
+        y_probs=y_probs,
+        out_folder=out_dir,
+        model="M",
+        lr=1e-3,
+        bs=8,
+        wd=0.0,
+        prefix="run",
+        threshold=0.5,
+        top_k=5,
+    )
+
+    out = capsys.readouterr().out
+    assert "Skipping error tables — expected 1D probabilities for binary." in out
+    assert fn_path is None and fp_path is None
+
+
+# ------------------------------------------------------------------------------
+# save_confidence_histogram
+# ------------------------------------------------------------------------------
+
+
+def test_save_confidence_histogram_binary_saves_png(tmp_path: Path) -> None:
+    plot_dir = tmp_path / "plots"
+    plot_dir.mkdir(parents=True, exist_ok=True)
+
+    # Binary labels; function only needs y_probs to be 1-D, but keep labels consistent
+    y_true = np.array([0, 1, 0, 1, 1, 0], dtype=int)
+    y_probs = np.array([0.05, 0.90, 0.40, 0.75, 0.20, 0.10], dtype=float)
+
+    out_path = save_confidence_histogram(
+        y_true=y_true,
+        y_probs=y_probs,
+        out_folder=plot_dir,
+        model="M",
+        lr=1e-3,
+        bs=8,
+        wd=0.0,
+        prefix="run",
+        bins=10,
+        fold=1,
+        epoch=1,
+        title="Confidence Histogram",
+    )
+
+    assert out_path is not None
+    assert out_path.exists()
+    # File should be non-empty
+    assert out_path.stat().st_size > 0
+
+
+def test_save_confidence_histogram_skips_on_non_1d_probs(
+    tmp_path: Path, capsys
+) -> None:
+    plot_dir = tmp_path / "plots"
+    plot_dir.mkdir(parents=True, exist_ok=True)
+
+    # Valid binary labels but 2-D probs -> function should skip and return None
+    y_true = np.array([0, 1, 0, 1], dtype=int)
+    y_probs = np.array(
+        [
+            [0.9, 0.1],
+            [0.2, 0.8],
+            [0.6, 0.4],
+            [0.3, 0.7],
+        ],
+        dtype=float,
+    )
+
+    out_path = save_confidence_histogram(
+        y_true=y_true,
+        y_probs=y_probs,
+        out_folder=plot_dir,
+        model="M",
+        lr=1e-3,
+        bs=8,
+        wd=0.0,
+        prefix="run",
+        bins=20,
+        fold=1,
+        epoch=1,
+        title="Confidence Histogram",
+    )
+
+    out = capsys.readouterr().out
+    assert (
+        "Skipping confidence histogram — expected 1D probabilities for binary." in out
+    )
+    assert out_path is None
+
+
+def test_save_confidence_histogram_rejects_bad_out_folder_type(tmp_path: Path) -> None:
+    y_true = np.array([0, 1, 0, 1], dtype=int)
+    y_probs = np.array([0.1, 0.9, 0.2, 0.8], dtype=float)
+
+    with pytest.raises(ValueError, match=r"^out_folder must be a string or Path."):
+        save_confidence_histogram(
+            y_true=y_true,
+            y_probs=y_probs,
+            out_folder=123,  # invalid type
+            model="M",
+            lr=1e-3,
+            bs=8,
+            wd=0.0,
+            prefix="run",
+        )
+
+
+# ------------------------------------------------------------------------------
+# save_confidence_histogram_split
+# ------------------------------------------------------------------------------
+
+
+def test_save_confidence_histogram_split_binary_saves_png(tmp_path: Path) -> None:
+    plot_dir = tmp_path / "plots"
+    plot_dir.mkdir(parents=True, exist_ok=True)
+
+    y_true = np.array([0, 1, 0, 1, 1, 0], dtype=int)
+    y_probs = np.array([0.05, 0.90, 0.40, 0.75, 0.20, 0.60], dtype=float)
+
+    out_path = save_confidence_histogram_split(
+        y_true=y_true,
+        y_probs=y_probs,
+        out_folder=plot_dir,
+        model="M",
+        lr=1e-3,
+        bs=8,
+        wd=0.0,
+        prefix="run",
+        threshold=0.5,
+        bins=10,
+        fold=1,
+        epoch=1,
+        title="Confidence Histogram (Correct vs Incorrect)",
+    )
+
+    assert out_path is not None
+    assert out_path.exists()
+    assert out_path.stat().st_size > 0
+
+
+def test_save_confidence_histogram_split_skips_on_non_1d_probs(
+    tmp_path: Path, capsys
+) -> None:
+    plot_dir = tmp_path / "plots"
+    plot_dir.mkdir(parents=True, exist_ok=True)
+
+    y_true = np.array([0, 1, 0, 1], dtype=int)
+    # 3 columns -> not auto-sliceable; should skip
+    y_probs = np.array(
+        [
+            [0.1, 0.2, 0.7],
+            [0.8, 0.1, 0.1],
+            [0.3, 0.3, 0.4],
+            [0.6, 0.2, 0.2],
+        ],
+        dtype=float,
+    )
+
+    out_path = save_confidence_histogram_split(
+        y_true=y_true,
+        y_probs=y_probs,
+        out_folder=plot_dir,
+        model="M",
+        lr=1e-3,
+        bs=8,
+        wd=0.0,
+        prefix="run",
+        threshold=0.5,
+        bins=20,
+    )
+
+    out = capsys.readouterr().out
+    assert (
+        "Skipping confidence histogram split — expected 1D probabilities for binary."
+        in out
+    )
+    assert out_path is None
+
+
+def test_save_confidence_histogram_split_skips_labels_not_binary(
+    tmp_path: Path, capsys
+) -> None:
+    plot_dir = tmp_path / "plots"
+    plot_dir.mkdir(parents=True, exist_ok=True)
+
+    y_true = np.array([0, 1, 0, 2], dtype=int)  # bad expect binary labels
+    y_probs = np.array([0.05, 0.90, 0.40, 0.75, 0.20, 0.60], dtype=float)
+
+    out_path = save_confidence_histogram_split(
+        y_true=y_true,
+        y_probs=y_probs,
+        out_folder=plot_dir,
+        model="M",
+        lr=1e-3,
+        bs=8,
+        wd=0.0,
+        prefix="run",
+        threshold=0.5,
+        bins=20,
+    )
+
+    out = capsys.readouterr().out
+    assert "Skipping confidence histogram split — expected binary labels." in out
+    assert out_path is None
+
+
+def test_save_confidence_histogram_split_autoslices_2col_binary_probs(
+    tmp_path: Path,
+) -> None:
+    plot_dir = tmp_path / "plots"
+    plot_dir.mkdir(parents=True, exist_ok=True)
+
+    y_true = np.array([0, 1, 1, 0], dtype=int)
+    # Should auto-slice [:,1]
+    y_probs_2d = np.array(
+        [
+            [0.9, 0.1],
+            [0.2, 0.8],
+            [0.6, 0.4],  # incorrect for positive at thr=0.5
+            [0.3, 0.7],  # incorrect for negative at thr=0.5
+        ],
+        dtype=float,
+    )
+
+    out_path = save_confidence_histogram_split(
+        y_true=y_true,
+        y_probs=y_probs_2d,
+        out_folder=plot_dir,
+        model="M",
+        lr=1e-3,
+        bs=8,
+        wd=0.0,
+        prefix="run",
+        threshold=0.5,
+        bins=15,
+    )
+
+    assert out_path is not None
+    assert out_path.exists()
+
+
+def test_save_confidence_histogram_split_rejects_bad_threshold(tmp_path: Path) -> None:
+    plot_dir = tmp_path / "plots"
+    plot_dir.mkdir(parents=True, exist_ok=True)
+
+    y_true = np.array([0, 1, 0, 1], dtype=int)
+    y_probs = np.array([0.2, 0.8, 0.1, 0.9], dtype=float)
+
+    with pytest.raises(
+        ValueError, match=r"^threshold must be a numeric value in \[0.0, 1.0\]"
+    ):
+        save_confidence_histogram_split(
+            y_true=y_true,
+            y_probs=y_probs,
+            out_folder=plot_dir,
+            model="M",
+            lr=1e-3,
+            bs=8,
+            wd=0.0,
+            prefix="run",
+            threshold=1.5,  # bad
+        )
+
+
+def test_save_confidence_histogram_split_rejects_bad_out_folder() -> None:
+    y_true = np.array([0, 1, 0, 1], dtype=int)
+    y_probs = np.array([0.2, 0.8, 0.1, 0.9], dtype=float)
+
+    with pytest.raises(ValueError, match=r"^out_folder must be a string or Path."):
+        save_confidence_histogram_split(
+            y_true=y_true,
+            y_probs=y_probs,
+            out_folder=123,  # bad
+            model="M",
+            lr=1e-3,
+            bs=8,
+            wd=0.0,
+            prefix="run",
+            threshold=0.5,
+        )
+
+
+# def test_save_threshold_sweep_table_binary(tmp_path):
+#     y_true = [0, 1, 0, 1]
+#     y_probs = [0.1, 0.9, 0.2, 0.8]
+#     csv_p = save_threshold_sweep_table(
+#         y_true, y_probs, tmp_path, "ECGConvNet", 0.001, 64, 0.0005, "final"
+#     )
+#     assert csv_p.exists()
+#     import pandas as pd
+#     df = pd.read_csv(csv_p)
+#     assert set(["threshold", "precision", "recall", "f1", "accuracy"]).issubset(df.columns)
+
+# def test_save_confidence_histogram(tmp_path):
+#     y_probs = [0.1, 0.2, 0.8, 0.9]
+#     p = save_confidence_histogram(
+#         y_probs, tmp_path, "ECGConvNet", 0.001, 64, 0.0005, "final"
+#     )
+#     assert p.exists()
+
+# def test_save_det_curve_binary(tmp_path):
+#     y_true = [0, 1, 0, 1, 1, 0, 0, 1]
+#     y_probs = [0.2, 0.9, 0.3, 0.8, 0.7, 0.1, 0.4, 0.6]
+#     p = save_det_curve(
+#         y_true, y_probs, tmp_path, "ECGConvNet", 0.001, 64, 0.0005, "final"
+#     )
+#     assert p is not None and p.exists()
+
+# def test_save_lift_gain_curves_binary(tmp_path):
+#     y_true = [0, 1, 0, 1, 1, 0, 0, 1]
+#     y_probs = [0.2, 0.9, 0.3, 0.8, 0.7, 0.1, 0.4, 0.6]
+#     gain_p, lift_p = save_lift_gain_curves(
+#         y_true, y_probs, tmp_path, "ECGConvNet", 0.001, 64, 0.0005, "final"
+#     )
+#     assert gain_p is not None and gain_p.exists()
+#     assert lift_p is not None and lift_p.exists()
+
+# def test_save_error_tables_binary(tmp_path):
+#     y_true = [0, 1, 0, 1, 1, 0, 0, 1]
+#     y_probs = [0.2, 0.9, 0.3, 0.8, 0.51, 0.49, 0.52, 0.48]
+#     fn_p, fp_p = save_error_tables(
+#         y_true, y_probs, tmp_path, "ECGConvNet", 0.001, 64, 0.0005, "final", threshold=0.5, top_k=3
+#     )
+#     assert fn_p is not None and fn_p.exists()
+#     assert fp_p is not None and fp_p.exists()
+
+
+# ------------------------------------------------------------------------------
 # evaluate_and_plot (integration-style)
 # ------------------------------------------------------------------------------
 
@@ -1363,7 +2544,7 @@ def test_evaluate_and_plot_hits_pr_skip(tmp_path: Path, capsys):
     assert "Skipping PR curve" in out
 
 
-def test_evaluate_and_plot_hits_1097_1149_1202_with_empty_ovr(tmp_path: Path):
+def test_evaluate_and_plot_with_empty_ovr(tmp_path: Path):
     out_dir = tmp_path / "plots"
     out_dir.mkdir(parents=True, exist_ok=True)
     class_names = ["A", "B", "C"]
@@ -1444,7 +2625,7 @@ def test_evaluate_and_plot_hits_pr_threshold_skip(tmp_path: Path, capsys):
         wd=0.0,
         prefix="run",
         fname_metric="metric",
-        out_folder=tmp_path,
+        out_folder=out_dir,
         class_names=class_names,
         y_probs=y_probs,
         fold=1,
@@ -1497,3 +2678,53 @@ def test_evaluate_and_plot_roc_ovr_disabled_message(tmp_path: Path, capsys):
 
     out = capsys.readouterr().out
     assert "ROC OvR disabled (ECG_PLOTS_ENABLE_OVR is False)" in out
+
+
+def test_evaluate_and_plot_binary_with_2d_probs(tmp_path, capsys):
+    out_dir = tmp_path / "plots"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    class_names = ["neg", "pos"]
+
+    # Binary labels
+    y_true = np.array([0, 1, 0, 1])
+
+    # 2D probs with 2 columns (simulate softmax output)
+    # Column 0 = P(neg), Column 1 = P(pos)
+    y_probs = np.array(
+        [
+            [0.8, 0.2],
+            [0.3, 0.7],
+            [0.9, 0.1],
+            [0.4, 0.6],
+        ]
+    )
+
+    y_pred = np.argmax(y_probs, axis=1)
+
+    train_accs, val_accs = [0.5], [0.6]
+    train_losses, val_losses = [1.0], [0.9]
+
+    # Run evaluate_and_plot — should hit the branch that slices [:,1]
+    evaluate_and_plot(
+        y_true=y_true,
+        y_pred=y_pred,
+        train_accs=train_accs,
+        val_accs=val_accs,
+        train_losses=train_losses,
+        val_losses=val_losses,
+        model="M",
+        lr=1e-3,
+        bs=8,
+        wd=0.0,
+        prefix="run",
+        fname_metric="metric",
+        out_folder=out_dir,
+        class_names=class_names,
+        y_probs=y_probs,
+        fold=1,
+        epoch=1,
+    )
+
+    out = capsys.readouterr().out
+    # Sanity check: calibration output was printed (meaning slice branch executed)
+    assert "Calibration Curve" in out or "cal_path" in out

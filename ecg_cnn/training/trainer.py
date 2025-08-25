@@ -21,6 +21,21 @@ from ecg_cnn.paths import HISTORY_DIR, MODELS_DIR, PTBXL_DATA_DIR
 from ecg_cnn.training.training_utils import compute_class_weights
 
 
+# ------------------------------------------------------------------------------
+# Globals
+# ------------------------------------------------------------------------------
+SEED = 22
+
+# Simple in-process dataset cache to avoid reloading per fold/run.
+# Keyed by data-affecting fields only (NO model/hparams here).
+_DATASET_CACHE = {}
+
+
+# ------------------------------------------------------------------------------
+# Modules
+# ------------------------------------------------------------------------------
+
+
 def train_one_epoch(model, dataloader, optimizer, criterion, device):
     """
     Trains the model for one epoch on the given dataloader.
@@ -271,22 +286,45 @@ def run_training(
     # --------------------------------------------------------------------------
 
     t0 = time.time()
-    SEED = 22
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Load and preprocess data
     data_dir = Path(config.data_dir) if config.data_dir else PTBXL_DATA_DIR
+
+    # ----------------------------------------------------------------------
+    # NEW: cache dataset in-process so folds/runs reuse the same arrays
+    # Key includes only data-affecting fields (not model/hparams).
+    # ----------------------------------------------------------------------
     if config.sample_only:
-        X, y, meta = load_ptbxl_sample(
-            sample_dir=config.sample_dir,
-            ptb_path=data_dir,
+        key = (
+            str(Path(config.sample_dir).resolve()) if config.sample_dir else "None",
+            "sample_only",
+            int(config.sampling_rate),
         )
     else:
-        X, y, meta = load_ptbxl_full(
-            data_dir=data_dir,
-            subsample_frac=config.subsample_frac,
-            sampling_rate=config.sampling_rate,
+        key = (
+            str(data_dir.resolve()),
+            float(config.subsample_frac),
+            int(config.sampling_rate),
         )
+
+    cached = _DATASET_CACHE.get(key)
+    if cached is not None:
+        X, y, meta = cached
+    else:
+        if config.sample_only:
+            X, y, meta = load_ptbxl_sample(
+                sample_dir=config.sample_dir,
+                ptb_path=data_dir,
+            )
+        else:
+            X, y, meta = load_ptbxl_full(
+                data_dir=data_dir,
+                subsample_frac=config.subsample_frac,
+                sampling_rate=config.sampling_rate,
+            )
+        _DATASET_CACHE[key] = (X, y, meta)
+    # ----------------------------------------------------------------------
 
     # Drop unknowns
     keep = np.array([lbl != "Unknown" for lbl in y], dtype=bool)
@@ -343,7 +381,8 @@ def run_training(
         y_src = y_tensor
     y_train_np = y_src.numpy()
     num_classes = len(np.unique(y_train_np))
-    class_weights = compute_class_weights(y_train_np, num_classes)
+    class_weights = compute_class_weights(y_train_np, num_classes)  # numpy -> torch
+    class_weights = torch.tensor(class_weights, dtype=torch.float32, device=device)
     criterion = nn.CrossEntropyLoss(weight=class_weights)
 
     best_loss = float("inf")

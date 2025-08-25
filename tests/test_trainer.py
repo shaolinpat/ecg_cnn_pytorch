@@ -36,12 +36,15 @@ from pathlib import Path
 import types
 
 import numpy as np
+import pandas as pd
 import pytest
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
+from ecg_cnn.training import trainer
 from ecg_cnn.training.trainer import (
+    _DATASET_CACHE,
     train_one_epoch,
     evaluate_on_validation,
     run_training,
@@ -683,6 +686,66 @@ def test_run_training_sample_only_calls_sample_loader(
     # Verify the function received the exact paths we set
     assert captured["ptb_path"] == data_root
     assert captured["sample_dir"] == str(sample_root)
+
+
+def test_run_training_cache_hit_assigns(monkeypatch, tmp_path):
+
+    # Clean real cache; avoid FS side effects
+    trainer._DATASET_CACHE.clear()
+    monkeypatch.setattr(trainer, "HISTORY_DIR", tmp_path, raising=False)
+    monkeypatch.setattr(trainer, "MODELS_DIR", tmp_path, raising=False)
+
+    # Make isinstance(config, TrainConfig) accept your DummyConfig
+    monkeypatch.setattr(trainer, "TrainConfig", DummyConfig, raising=False)
+
+    # Wire your DummyModel and minimal globals
+    monkeypatch.setattr(
+        trainer,
+        "model_utils",
+        types.SimpleNamespace(DummyModel=DummyModel),
+        raising=False,
+    )
+    monkeypatch.setattr(trainer, "FIVE_SUPERCLASSES", ["A", "B"], raising=False)
+    monkeypatch.setattr(
+        trainer, "compute_class_weights", lambda y_np, n: torch.ones(n), raising=False
+    )
+
+    # Config that takes the non-sample key path
+    cfg = DummyConfig(
+        data_dir=str(tmp_path),
+        sample_only=False,
+        subsample_frac=0.5,
+        sampling_rate=100,
+        n_folds=2,
+        batch_size=4,
+        model="DummyModel",
+        n_epochs=1,  # skip training loop
+        save_best=False,
+        verbose=False,
+    )
+
+    # Pre-populate the EXACT key run_training will compute
+    data_dir = Path(cfg.data_dir) if cfg.data_dir else trainer.PTBXL_DATA_DIR
+    key = (str(data_dir.resolve()), float(cfg.subsample_frac), int(cfg.sampling_rate))
+
+    N = 10
+    X = np.random.randn(N, 1, 10).astype("float32")
+    y = ["A" if i % 2 == 0 else "B" for i in range(N)]
+    meta = pd.DataFrame({"id": np.arange(N)})
+    trainer._DATASET_CACHE[key] = (X, y, meta)
+
+    # Fail loudly if cache isn't used
+    def _should_not_be_called(*args, **kwargs):
+        raise AssertionError("load_ptbxl_full should not be called on cache hit")
+
+    monkeypatch.setattr(
+        trainer, "load_ptbxl_full", _should_not_be_called, raising=False
+    )
+
+    # Execute code under test; this hits line 540
+    out = trainer.run_training(cfg, fold_idx=0, tag="t1")
+    assert isinstance(out, dict)
+    assert len(trainer._DATASET_CACHE) == 1
 
 
 # ------------------------------------------------------------------------------

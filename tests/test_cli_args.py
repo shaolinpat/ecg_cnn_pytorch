@@ -151,12 +151,14 @@ def test_positive_int_valid():
 
 
 def test_positive_int_negative():
-    with pytest.raises(argparse.ArgumentTypeError, match="not a positive integer"):
+    with pytest.raises(
+        argparse.ArgumentTypeError, match=r"^-3 is not a positive integer"
+    ):
         _positive_int("-3")
 
 
 def test_positive_int_non_numeric():
-    with pytest.raises(argparse.ArgumentTypeError, match="not an integer"):
+    with pytest.raises(argparse.ArgumentTypeError, match=r"^five is not an integer"):
         _positive_int("five")
 
 

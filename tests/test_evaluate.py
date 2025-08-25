@@ -245,7 +245,7 @@ def test_main_raises_if_no_matching_summary(mock_load_config, patch_paths, monke
         mock.patch("torch.load"),
         mock.patch("ecg_cnn.evaluate.MODEL_CLASSES", {"ECGConvNet": mock.MagicMock()}),
         mock.patch("ecg_cnn.evaluate.evaluate_and_plot"),
-        pytest.raises(ValueError, match="No summary entry found for fold 99"),
+        pytest.raises(ValueError, match=r"^No summary entry found for fold 99"),
     ):
         mctx.setattr(evaluate, "_read_summary", _raise_no_match, raising=False)
         evaluate.main()
@@ -357,7 +357,7 @@ def test_main_raises_when_config_missing_batch_size(
     mock_TrainConfig.return_value = SimpleNamespace(model="ECGConvNet")
 
     with pytest.raises(
-        ValueError, match="Config is missing required field 'batch_size'."
+        ValueError, match=r"^Config is missing required field 'batch_size'."
     ):
         evaluate.main()
 
@@ -376,7 +376,7 @@ def test_main_raises_when_config_missing_model(
     # Return a config object with batch_size but NO model
     mock_TrainConfig.return_value = SimpleNamespace(batch_size=32)
 
-    with pytest.raises(ValueError, match="Config is missing required field 'model'."):
+    with pytest.raises(ValueError, match=r"^Config is missing required field 'model'."):
         evaluate.main()
 
 
@@ -396,7 +396,7 @@ def test_main_raises_when_config_missing_tag(
     mock_TrainConfig.return_value = SimpleNamespace(model="ECGConvNet", batch_size=32)
 
     with pytest.raises(
-        ValueError, match="Config is missing 'tag'; cannot locate summaries/models."
+        ValueError, match=r"^Config is missing 'tag'; cannot locate summaries/models."
     ):
         evaluate.main()
 
@@ -463,7 +463,9 @@ def test_main_raises_when_summary_lacks_model_path_triggers_value_error(
         mctx.setattr(
             evaluate, "MODEL_CLASSES", {"ECGConvNet": mock.MagicMock()}, raising=False
         )
-        with pytest.raises(ValueError, match="Chosen summary entry lacks 'model_path'"):
+        with pytest.raises(
+            ValueError, match=r"^Chosen summary entry lacks 'model_path'"
+        ):
             evaluate.main(fold_override=0)
 
 
@@ -528,7 +530,10 @@ def test_main_raises_when_unknown_model(
         json.dumps([{"fold": 0, "loss": 0.12, "model_path": str(ckpt)}])
     )
 
-    with pytest.raises(ValueError, match="Unknown model 'DoesNotExist'"):
+    with pytest.raises(
+        ValueError,
+        match=r"^Unknown model 'DoesNotExist'. Add it to ecg_cnn.models.MODEL_CLASSES.",
+    ):
         evaluate.main(fold_override=0)
 
 
@@ -916,14 +921,14 @@ def test_main_loads_history_successfully(mock_load_config, patch_paths, monkeypa
 
 def test_read_summary_raises_when_file_missing(monkeypatch, tmp_path):
     monkeypatch.setattr(evaluate, "RESULTS_DIR", tmp_path, raising=False)
-    with pytest.raises(FileNotFoundError, match="Missing summary for tag 'dummy'"):
+    with pytest.raises(FileNotFoundError, match=r"^Missing summary for tag 'dummy'"):
         evaluate._read_summary("dummy")
 
 
 def test_read_summary_raises_when_empty(monkeypatch, tmp_path):
     monkeypatch.setattr(evaluate, "RESULTS_DIR", tmp_path, raising=False)
     (tmp_path / "summary_dummy.json").write_text("[]")  # empty file
-    with pytest.raises(ValueError, match="Summary JSON malformed or empty"):
+    with pytest.raises(ValueError, match=r"^Summary JSON malformed or empty"):
         evaluate._read_summary("dummy")
 
 
@@ -937,7 +942,7 @@ def test_select_best_entry_raises_for_missing_fold():
         {"fold": 0, "loss": 0.10},
         {"fold": 1, "loss": 0.05},
     ]
-    with pytest.raises(ValueError, match="No summary entry found for fold 99"):
+    with pytest.raises(ValueError, match=r"^No summary entry found for fold 99"):
         evaluate._select_best_entry(summaries, fold_override=99)
 
 
@@ -946,7 +951,7 @@ def test_select_best_entry_raises_when_loss_missing():
         {"fold": 0},  # missing 'loss'
         {"fold": 1, "loss": 0.05},
     ]
-    with pytest.raises(ValueError, match="Summary entries missing 'loss' key"):
+    with pytest.raises(ValueError, match=r"^Summary entries missing 'loss' key"):
         evaluate._select_best_entry(summaries, fold_override=None)
 
 
