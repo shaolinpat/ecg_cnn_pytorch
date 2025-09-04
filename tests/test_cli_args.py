@@ -5,7 +5,8 @@ Tests for ecg_cnn.training.cli_args.
 
 Covers
 ------
-    - parse_args(): defaults and per-flag overrides
+    - parse_training_args(): defaults and per-flag overrides
+    - parse_evaluate_args(): defaults and per-flag overrides
     - _positive_int(): value parsing/validation
     - override_config_with_args(): happy path + validation/error paths
 """
@@ -16,14 +17,14 @@ import sys
 import pytest
 
 from ecg_cnn.training.cli_args import (
-    parse_args,
+    parse_training_args,
     _positive_int,
     override_config_with_args,
 )
 
 
 # ------------------------------------------------------------------------------
-# def parse_args():
+# def parse_training_args():
 # ------------------------------------------------------------------------------
 
 
@@ -67,9 +68,9 @@ from ecg_cnn.training.cli_args import (
         (["--verbose"], {"verbose": True}),
     ],
 )
-def test_parse_args(monkeypatch, cli_input, expected):
+def test_parse_training_args(monkeypatch, cli_input, expected):
     monkeypatch.setattr(sys, "argv", ["train.py"] + cli_input)
-    args = parse_args()
+    args = parse_training_args()
 
     for key, expected_val in expected.items():
         actual_val = getattr(args, key)
@@ -129,20 +130,22 @@ def test_override_config_updates_fields(make_train_config, make_args):
         ["--kernel-sizes", "3", "0", "7"],  # zero not allowed
     ],
 )
-def test_invalid_kernel_sizes_count_or_type(monkeypatch, invalid_kernels):
+def test_parse_training_args_invalid_kernel_sizes_count_or_type(
+    monkeypatch, invalid_kernels
+):
     monkeypatch.setattr(sys, "argv", ["train.py"] + invalid_kernels)
     with pytest.raises(SystemExit):
-        parse_args()
+        parse_training_args()
 
 
-def test_valid_kernel_sizes(monkeypatch):
+def test_parse_training_args_valid_kernel_sizes(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["train.py", "--kernel-sizes", "3", "5", "7"])
-    args = parse_args()
+    args = parse_training_args()
     assert args.kernel_sizes == [3, 5, 7]
 
 
 # ------------------------------------------------------------------------------
-# def _positive_int(value):
+# def _positive_int():
 # ------------------------------------------------------------------------------
 
 
@@ -163,8 +166,7 @@ def test_positive_int_non_numeric():
 
 
 # ------------------------------------------------------------------------------
-# def override_config_with_args(config: TrainConfig, args: Namespace)
-#       -> TrainConfig:
+# override_config_with_args()
 # ------------------------------------------------------------------------------
 
 

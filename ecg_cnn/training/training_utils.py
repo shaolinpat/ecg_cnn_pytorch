@@ -1,3 +1,5 @@
+# training/training_utils.py
+
 import numpy as np
 import torch
 
@@ -36,5 +38,8 @@ def compute_class_weights(y: np.ndarray, num_classes: int) -> torch.Tensor:
 
     counts = np.bincount(y, minlength=num_classes)
     total = counts.sum()
-    weights = total / (num_classes * counts)
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        weights = total / (num_classes * counts.astype(np.float64))
+
     return torch.tensor(weights, dtype=torch.float32)

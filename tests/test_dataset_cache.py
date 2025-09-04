@@ -19,20 +19,9 @@ import pytest
 
 import ecg_cnn.data.dataset_cache as dc
 
-
 # ------------------------------------------------------------------------------
-# Local fixtures (scoped to this file)
+# Helpers
 # ------------------------------------------------------------------------------
-
-
-@pytest.fixture(autouse=True)
-def _clear_ram_cache():
-    """Ensure the module-level RAM cache never leaks between tests."""
-    dc._RAM_CACHE.clear()
-    try:
-        yield
-    finally:
-        dc._RAM_CACHE.clear()
 
 
 @pytest.fixture
@@ -64,7 +53,7 @@ def _fake_loaded(n: int = 4, unknown: bool = False):
 
 
 # ------------------------------------------------------------------------------
-# A. Basic roundtrip & simple parameter validation
+# get_dataset_cached()
 # ------------------------------------------------------------------------------
 
 
@@ -96,23 +85,18 @@ def test_cached_roundtrip(patch_paths, make_train_config, monkeypatch):
     pd.testing.assert_frame_equal(m1, m2)
 
 
-def test_invalid_sampling_rate(patch_paths, make_train_config):
+def test_get_dataset_cached_invalid_sampling_rate(patch_paths, make_train_config):
     # Invalid sampling_rate value is rejected early.
     cfg = make_train_config(sampling_rate=123)
     with pytest.raises(ValueError, match=r"^cfg\.sampling_rate must be 100 or 500"):
         dc.get_dataset_cached(cfg)
 
 
-def test_subsample_bounds(patch_paths, make_train_config):
+def test_get_dataset_cached_subsample_bounds(patch_paths, make_train_config):
     # subsample_frac must be within (0, 1].
     cfg = make_train_config(subsample_frac=0.0)
     with pytest.raises(ValueError, match=r"^cfg\.subsample_frac must be in \(0, 1\]"):
         dc.get_dataset_cached(cfg)
-
-
-# ------------------------------------------------------------------------------
-# B. _validate_cfg branches (type/value checks)
-# ------------------------------------------------------------------------------
 
 
 def test_get_dataset_cached_rejects_nontrainconfig_typeerror(patch_paths):
@@ -154,11 +138,6 @@ def test_get_dataset_cached_validate_cfg_nonexistent_dirs(
     bad2 = make_train_config(sample_dir=tmp_path / "missingB")
     with pytest.raises(ValueError, match=r"^cfg\.sample_dir does not exist"):
         dc.get_dataset_cached(bad2)
-
-
-# ------------------------------------------------------------------------------
-# C. Cache behavior: RAM, disk, force-reload; sample vs full loaders
-# ------------------------------------------------------------------------------
 
 
 def test_get_dataset_cached_uses_ram_cache_on_second_call(
@@ -301,12 +280,99 @@ def test_get_dataset_cached_raises_when_all_labels_unknown(
         dc.get_dataset_cached(cfg, use_disk_cache=False, force_reload=True)
 
 
+def test_get_dataset_cached_validate_cfg_subsample_frac_not_floatlike(
+    patch_paths, make_train_config
+):
+    # subsample_frac must be float-like
+    bad = make_train_config(subsample_frac="nope")  # not float-like
+    with pytest.raises(TypeError, match=r"^cfg\.subsample_frac must be float-like"):
+        dc.get_dataset_cached(bad)
+
+
+def test_get_dataset_cached_validate_cfg_sampling_rate_wrong_type(
+    patch_paths, make_train_config
+):
+    # sampling rate must be an int
+    bad = make_train_config(sampling_rate="500")  # wrong type (string)
+    with pytest.raises(TypeError, match=r"^cfg\.sampling_rate must be int"):
+        dc.get_dataset_cached(bad)
+
+
+def test_get_dataset_cached_validate_loaded_raises_on_bad_ndim(
+    patch_paths, make_train_config, monkeypatch
+):
+    # X with ndim < 2 is invalid.
+    def fake_sample(**kwargs):
+        X = np.random.randn(5).astype(np.float32)
+        y = ["NORM"] * 5
+        meta = pd.DataFrame({"id": range(5)})
+        return X, y, meta
+
+    monkeypatch.setattr(dc, "load_ptbxl_sample", fake_sample, raising=True)
+    cfg = make_train_config(sample_only=True)
+    with pytest.raises(ValueError, match=r"^X must be a numpy array with ndim>=2"):
+        dc.get_dataset_cached(cfg, use_disk_cache=False, force_reload=True)
+
+
+def test_get_dataset_cached_validate_loaded_raises_on_bad_meta_type(
+    patch_paths, make_train_config, monkeypatch
+):
+    # meta must be a pandas DataFrame.
+    def fake_sample(**kwargs):
+        X = np.random.randn(4, 12, 100).astype(np.float32)
+        y = ["NORM"] * 4
+        meta = {"id": [0, 1, 2, 3]}  # not a DataFrame
+        return X, y, meta
+
+    monkeypatch.setattr(dc, "load_ptbxl_sample", fake_sample, raising=True)
+
+    cfg = make_train_config(sample_only=True)
+    with pytest.raises(ValueError, match=r"^meta must be a pandas DataFrame"):
+        dc.get_dataset_cached(cfg, use_disk_cache=False, force_reload=True)
+
+
+def test_get_dataset_cached_validate_loaded_raises_on_empty_dataset(
+    patch_paths, make_train_config, monkeypatch
+):
+    # Empty X is rejected.
+    def fake_sample(**kwargs):
+        X = np.empty((0, 12, 100), dtype=np.float32)
+        y = []
+        meta = pd.DataFrame({"id": []})
+        return X, y, meta
+
+    monkeypatch.setattr(dc, "load_ptbxl_sample", fake_sample, raising=True)
+    cfg = make_train_config(sample_only=True)
+    with pytest.raises(ValueError, match=r"^Loaded dataset is empty\."):
+        dc.get_dataset_cached(cfg, use_disk_cache=False, force_reload=True)
+
+
+def test_get_dataset_cached_validate_loaded_raises_on_length_mismatch_pre_drop_path(
+    patch_paths, make_train_config, monkeypatch
+):
+    # len(X), len(y), len(meta) mismatch caught in _drop_unknowns "before drop" path.
+    def fake_sample(**kwargs):
+        X = np.random.randn(4, 12, 100).astype(np.float32)
+        y = ["NORM"] * 3
+        meta = pd.DataFrame({"id": [0, 1, 2, 3]})
+        return X, y, meta
+
+    monkeypatch.setattr(dc, "load_ptbxl_sample", fake_sample, raising=True)
+
+    cfg = make_train_config(sample_only=True)
+    with pytest.raises(
+        ValueError,
+        match=r"^Length mismatch before drop: len\(X\)=4, len\(y\)=3, len\(meta\)=4",
+    ):
+        dc.get_dataset_cached(cfg, use_disk_cache=False, force_reload=True)
+
+
 # ------------------------------------------------------------------------------
-# D. _canon_paths and _cache_key when paths differ
+# _cache_key()
 # ------------------------------------------------------------------------------
 
 
-def test_get_dataset_cached_cache_key_differs_when_paths_change(
+def test_cache_key_differs_when_paths_change(
     tmp_path, patch_dataset_cache_paths, make_train_config
 ):
     # Cache key changes when canonicalized data/sample paths differ.
@@ -344,91 +410,8 @@ def test_cache_key_uses_patched_default_ptbxl_dir(
 
 
 # ------------------------------------------------------------------------------
-# E. Additional _validate_cfg and _validate_loaded error paths
+# _validate_loaded()
 # ------------------------------------------------------------------------------
-
-
-def test_validate_cfg_subsample_frac_not_floatlike(patch_paths, make_train_config):
-    # subsample_frac must be float-like
-    bad = make_train_config(subsample_frac="nope")  # not float-like
-    with pytest.raises(TypeError, match=r"^cfg\.subsample_frac must be float-like"):
-        dc.get_dataset_cached(bad)
-
-
-def test_validate_cfg_sampling_rate_wrong_type(patch_paths, make_train_config):
-    # sampling rate must be an int
-    bad = make_train_config(sampling_rate="500")  # wrong type (string)
-    with pytest.raises(TypeError, match=r"^cfg\.sampling_rate must be int"):
-        dc.get_dataset_cached(bad)
-
-
-def test_validate_loaded_raises_on_bad_ndim(
-    patch_paths, make_train_config, monkeypatch
-):
-    # X with ndim < 2 is invalid.
-    def fake_sample(**kwargs):
-        X = np.random.randn(5).astype(np.float32)
-        y = ["NORM"] * 5
-        meta = pd.DataFrame({"id": range(5)})
-        return X, y, meta
-
-    monkeypatch.setattr(dc, "load_ptbxl_sample", fake_sample, raising=True)
-    cfg = make_train_config(sample_only=True)
-    with pytest.raises(ValueError, match=r"^X must be a numpy array with ndim>=2"):
-        dc.get_dataset_cached(cfg, use_disk_cache=False, force_reload=True)
-
-
-def test_validate_loaded_raises_on_bad_meta_type(
-    patch_paths, make_train_config, monkeypatch
-):
-    # meta must be a pandas DataFrame.
-    def fake_sample(**kwargs):
-        X = np.random.randn(4, 12, 100).astype(np.float32)
-        y = ["NORM"] * 4
-        meta = {"id": [0, 1, 2, 3]}  # not a DataFrame
-        return X, y, meta
-
-    monkeypatch.setattr(dc, "load_ptbxl_sample", fake_sample, raising=True)
-
-    cfg = make_train_config(sample_only=True)
-    with pytest.raises(ValueError, match=r"^meta must be a pandas DataFrame"):
-        dc.get_dataset_cached(cfg, use_disk_cache=False, force_reload=True)
-
-
-def test_validate_loaded_raises_on_empty_dataset(
-    patch_paths, make_train_config, monkeypatch
-):
-    # Empty X is rejected.
-    def fake_sample(**kwargs):
-        X = np.empty((0, 12, 100), dtype=np.float32)
-        y = []
-        meta = pd.DataFrame({"id": []})
-        return X, y, meta
-
-    monkeypatch.setattr(dc, "load_ptbxl_sample", fake_sample, raising=True)
-    cfg = make_train_config(sample_only=True)
-    with pytest.raises(ValueError, match=r"^Loaded dataset is empty\."):
-        dc.get_dataset_cached(cfg, use_disk_cache=False, force_reload=True)
-
-
-def test_validate_loaded_raises_on_length_mismatch_pre_drop_path(
-    patch_paths, make_train_config, monkeypatch
-):
-    # len(X), len(y), len(meta) mismatch caught in _drop_unknowns "before drop" path.
-    def fake_sample(**kwargs):
-        X = np.random.randn(4, 12, 100).astype(np.float32)
-        y = ["NORM"] * 3
-        meta = pd.DataFrame({"id": [0, 1, 2, 3]})
-        return X, y, meta
-
-    monkeypatch.setattr(dc, "load_ptbxl_sample", fake_sample, raising=True)
-
-    cfg = make_train_config(sample_only=True)
-    with pytest.raises(
-        ValueError,
-        match=r"^Length mismatch before drop: len\(X\)=4, len\(y\)=3, len\(meta\)=4",
-    ):
-        dc.get_dataset_cached(cfg, use_disk_cache=False, force_reload=True)
 
 
 def test_validate_loaded_meta_type_error_hits():
@@ -452,7 +435,7 @@ def test_validate_loaded_length_mismatch():
 
 
 # ------------------------------------------------------------------------------
-# F. _drop_unknowns error paths
+# _drop_unknowns()
 # ------------------------------------------------------------------------------
 
 

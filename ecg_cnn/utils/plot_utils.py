@@ -1,10 +1,16 @@
 # ecg_cnn/utils/plot_utils.py
 
+import csv
+import json
 import matplotlib.pyplot as plt
 import numpy as np
 import os
 import pandas as pd
+import re
 import seaborn as sns
+import shap
+import statistics
+import torch
 
 from pathlib import Path
 from sklearn.calibration import calibration_curve
@@ -21,6 +27,7 @@ from sklearn.metrics import (
     roc_auc_score,
     average_precision_score,
 )
+from typing import Any, List, Optional, Tuple, Union
 
 from ecg_cnn.utils.validate import (
     validate_hparams_formatting,
@@ -1582,442 +1589,6 @@ def save_confidence_histogram_split(
     return out_path
 
 
-# def evaluate_and_plot(
-#     y_true: list[int] | np.ndarray,
-#     y_pred: list[int] | np.ndarray,
-#     train_accs: list[float],
-#     val_accs: list[float],
-#     train_losses: list[float],
-#     val_losses: list[float],
-#     model: str,
-#     lr: float,
-#     bs: int,
-#     wd: float,
-#     prefix: str,
-#     fname_metric: str,
-#     out_folder: str | Path,
-#     class_names: list[str],
-#     y_probs: list[float] | np.ndarray,
-#     fold: int | None = None,
-#     epoch: int | None = None,
-#     enable_ovr: bool | None = None,  # optional override (env is default)
-#     ovr_classes: set[str] | None = None,  # optional override (env is default)
-# ) -> None:
-#     """
-#     Generate evaluation plots and save classification report using standardized formatting.
-
-#     Parameters
-#     ----------
-#     y_true : list of int or np.ndarray
-#         Ground-truth class labels.
-#     y_pred : list of int or np.ndarray
-#         Predicted class labels.
-#     train_accs : list of float
-#         Training accuracy values per epoch.
-#     val_accs : list of float
-#         Validation accuracy values per epoch.
-#     train_losses : list of float
-#         Training loss values per epoch.
-#     val_losses : list of float
-#         Validation loss values per epoch.
-#     model : str
-#         Model string indicates model used (e.g., "ECGConvNet").
-#     lr : float
-#         Learning rate. Must be in range [1e-6, 1.0].
-#     bs : int
-#         Batch size. Must be in range [1, 4096].
-#     wd : float
-#         Weight decay. Must be in range [0.0, 1.0].
-#     prefix : str
-#         Prefix string indicating model phase or purpose (e.g., "final", "best").
-#     fname_metric : str, optional
-#         Metric name (e.g., "loss", "accuracy") to include in filename.
-#     out_folder : str or Path
-#         Folder to save output files.
-#     class_names : list of str
-#         List of class labels (e.g., ["NORM", "MI", "STTC", ...]).
-#     y_probs : list of float or np.ndarray
-#         Predicted probabilities for the positive class (binary classification).
-#     fold : int or None, optional
-#         Fold number used in cross-validation. Must be a non-negative integer or
-#         None.
-#     epoch : int or None, optional
-#         Epoch number used for this plot (e.g., best epoch).
-#     enable_ovr : bool or None, optional
-#         Enables one-versus-rest plots if set to true. Default is None
-#     ovr_classes : set[str] or None, optional
-#         Set of class labels to do one-versus-rest plots for (e.g., {"NORM",
-#         "MI", "STTC"})
-
-#     Raises
-#     ------
-#     ValueError
-#         If input types or shapes are invalid.
-#     """
-#     # --- Validation ---
-#     validate_y_true_pred(y_true, y_pred)
-#     print(f"y_probs type: {type(y_probs)}")
-#     validate_y_probs(y_probs)
-
-#     if not isinstance(class_names, list) or not all(
-#         isinstance(c, str) for c in class_names
-#     ):
-#         raise ValueError("class_names must be a non-empty list of strings.")
-#     if len(class_names) == 0:
-#         raise ValueError("class_names cannot be empty.")
-
-#     indices_used = set(y_true) | set(y_pred)
-#     if any(i < 0 or i >= len(class_names) for i in indices_used):
-#         raise ValueError(
-#             "class_names must cover all class indices in y_true and y_pred."
-#         )
-
-#     if not isinstance(out_folder, (str, Path)):
-#         raise ValueError(f"out_folder must be a string or Path, got {type(out_folder)}")
-#     out_folder = Path(out_folder)
-
-#     n_epochs = len(train_accs)
-#     if not (n_epochs == len(val_accs) == len(train_losses) == len(val_losses)):
-#         raise ValueError("Training and validation metric lists must be equal in length")
-
-#     if fold is not None and (not isinstance(fold, (int, np.integer)) or fold < 1):
-#         raise ValueError("fold must be a positive integer if provided.")
-
-#     validate_hparams_formatting(
-#         model=model,
-#         lr=lr,
-#         bs=bs,
-#         wd=wd,
-#         prefix=prefix,
-#         fname_metric=fname_metric,
-#         fold=fold,
-#         epoch=epoch,
-#     )
-
-#     # Effective OvR settings (env defaults unless explicitly overridden)
-#     enable_ovr_effective = ENV_ENABLE_OVR if enable_ovr is None else bool(enable_ovr)
-#     ovr_classes_effective = (
-#         ENV_OVR_CLASSES
-#         if ovr_classes is None
-#         else (set(ovr_classes) if ovr_classes else None)
-#     )
-
-#     # --- Prepare output folders ---
-#     report_dir = out_folder / "reports"
-#     plot_dir = out_folder / "plots"
-#     report_dir.mkdir(parents=True, exist_ok=True)
-#     plot_dir.mkdir(parents=True, exist_ok=True)
-
-#     print(
-#         f"\n=== Final Evaluation (Model={model}, LR={lr}, BS={bs}, Fold={fold}, Epochs={epoch}) ==="
-#     )
-
-#     print("Classification Report:")
-#     print(
-#         classification_report(
-#             y_true,
-#             y_pred,
-#             labels=list(range(len(class_names))),
-#             target_names=class_names,
-#             zero_division=0,
-#         )
-#     )
-
-#     # --- Save classification report and heatmap ---
-#     save_classification_report(
-#         y_true=y_true,
-#         y_pred=y_pred,
-#         class_names=class_names,
-#         out_folder=report_dir,
-#         model=model,
-#         lr=lr,
-#         bs=bs,
-#         wd=wd,
-#         fold=fold,
-#         prefix=prefix,
-#         fname_metric="classification_report",
-#         epoch=epoch,
-#         title="Classification Report",
-#     )
-
-#     # --- Accuracy curve ---
-#     save_plot_curves(
-#         x_vals=train_accs,
-#         y_vals=val_accs,
-#         x_label="Epoch",
-#         y_label="Accuracy",
-#         title_metric="Accuracy",
-#         out_folder=plot_dir,
-#         model=model,
-#         lr=lr,
-#         bs=bs,
-#         wd=wd,
-#         prefix=prefix,
-#         fname_metric="accuracy",
-#         fold=fold,
-#         epoch=epoch,
-#     )
-
-#     # --- Loss curve ---
-#     save_plot_curves(
-#         x_vals=train_losses,
-#         y_vals=val_losses,
-#         x_label="Epoch",
-#         y_label="Loss",
-#         title_metric="Loss",
-#         out_folder=plot_dir,
-#         model=model,
-#         lr=lr,
-#         bs=bs,
-#         wd=wd,
-#         prefix=prefix,
-#         fname_metric="loss",
-#         fold=fold,
-#         epoch=epoch,
-#     )
-
-#     # --- Confusion matrix (normalized) ---
-#     save_confusion_matrix(
-#         y_true=y_true,
-#         y_pred=y_pred,
-#         class_names=class_names,
-#         out_folder=plot_dir,
-#         model=model,
-#         lr=lr,
-#         bs=bs,
-#         wd=wd,
-#         prefix=prefix,
-#         fname_metric="confusion_matrix",
-#         normalize=True,
-#         fold=fold,
-#         epoch=epoch,
-#     )
-
-#     # --- Standard PR curve (+AUPRC) ---
-#     if isinstance(y_probs, list):
-#         y_probs = np.asarray(y_probs)
-#     if y_probs.ndim == 1 and len(np.unique(y_true)) == 2:
-#         # Binary
-#         save_pr_curve(
-#             y_true=y_true,
-#             y_probs=y_probs,
-#             out_folder=plot_dir,
-#             model=model,
-#             lr=lr,
-#             bs=bs,
-#             wd=wd,
-#             prefix=prefix,
-#             fname_metric="pr_curve",
-#             fold=fold,
-#             epoch=epoch,
-#             title="Precision-Recall Curve",
-#         )
-#     elif y_probs.ndim == 2 and y_probs.shape[1] == len(class_names):
-#         if enable_ovr_effective:
-#             if ovr_classes_effective:
-#                 idxs = [
-#                     i for i, c in enumerate(class_names) if c in ovr_classes_effective
-#                 ]
-#                 if not idxs:
-#                     idxs = range(len(class_names))
-#             else:
-#                 idxs = range(len(class_names))
-#             for i in idxs:
-#                 class_label = class_names[i]
-#                 class_slug = str(class_label).lower()
-#                 y_true_bin = [1 if y == i else 0 for y in y_true]
-#                 save_pr_curve(
-#                     y_true=y_true_bin,
-#                     y_probs=y_probs[:, i],
-#                     out_folder=plot_dir,
-#                     model=model,
-#                     lr=lr,
-#                     bs=bs,
-#                     wd=wd,
-#                     prefix=f"{prefix}_ovr_{class_slug}",
-#                     fname_metric="pr_curve",
-#                     fold=fold,
-#                     epoch=epoch,
-#                     title=f"Precision-Recall Curve (OvR: {class_label})",
-#                 )
-#         else:
-#             print("PR OvR disabled (ECG_PLOTS_ENABLE_OVR is False)")
-#     else:
-#         print("Skipping PR curve — y_probs shape does not match expected format")
-
-#     # --- Precision/Recall vs. Threshold ---
-#     y_probs = np.asarray(y_probs)
-
-#     if y_probs.ndim == 1 and len(np.unique(y_true)) == 2:
-#         # Binary classification
-#         save_pr_threshold_curve(
-#             y_true=y_true,
-#             y_probs=y_probs,
-#             out_folder=plot_dir,
-#             model=model,
-#             lr=lr,
-#             bs=bs,
-#             wd=wd,
-#             epoch=epoch,
-#             prefix=prefix,
-#             fname_metric="pr_threshold",
-#             fold=fold,
-#             title=f"Precision & Recall vs Threshold ({class_names[1]} vs All)",
-#         )
-#     elif y_probs.ndim == 2 and y_probs.shape[1] == len(class_names):
-#         if enable_ovr_effective:
-#             if ovr_classes_effective:
-#                 idxs = [
-#                     i for i, c in enumerate(class_names) if c in ovr_classes_effective
-#                 ]
-#                 if not idxs:
-#                     idxs = range(len(class_names))
-#             else:
-#                 idxs = range(len(class_names))
-#             for i in idxs:
-#                 class_label = class_names[i]
-#                 class_slug = str(class_label).lower()
-#                 y_true_bin = [1 if y == i else 0 for y in y_true]
-#                 y_probs_bin = y_probs[:, i]
-
-#                 save_pr_threshold_curve(
-#                     y_true=y_true_bin,
-#                     y_probs=y_probs_bin,
-#                     out_folder=plot_dir,
-#                     model=model,
-#                     lr=lr,
-#                     bs=bs,
-#                     wd=wd,
-#                     epoch=epoch,
-#                     prefix=f"{prefix}_ovr_{class_slug}",
-#                     fname_metric="pr_threshold",
-#                     fold=fold,
-#                     title=f"Precision & Recall vs Threshold (OvR: {class_label})",
-#                 )
-#         else:
-#             print("PR-threshold OvR disabled (ECG_PLOTS_ENABLE_OVR is False)")
-#     else:
-#         print("Skipping PR curve — y_probs shape does not match expected format")
-
-#     # --- ROC curve (+AUROC) ---
-#     y_probs = np.asarray(y_probs)
-#     if y_probs.ndim == 1 and len(np.unique(y_true)) == 2:
-#         # Binary
-#         save_roc_curve(
-#             y_true=y_true,
-#             y_probs=y_probs,
-#             out_folder=plot_dir,
-#             model=model,
-#             lr=lr,
-#             bs=bs,
-#             wd=wd,
-#             prefix=prefix,
-#             fname_metric="roc_curve",
-#             fold=fold,
-#             epoch=epoch,
-#             title="ROC Curve",
-#         )
-#     elif y_probs.ndim == 2 and y_probs.shape[1] == len(class_names):
-#         if enable_ovr_effective:
-#             if ovr_classes_effective:
-#                 idxs = [
-#                     i for i, c in enumerate(class_names) if c in ovr_classes_effective
-#                 ]
-#                 if not idxs:
-#                     idxs = range(len(class_names))
-#             else:
-#                 idxs = range(len(class_names))
-#             for i in idxs:
-#                 class_label = class_names[i]
-#                 class_slug = str(class_label).lower()
-#                 y_true_bin = [1 if y == i else 0 for y in y_true]
-#                 save_roc_curve(
-#                     y_true=y_true_bin,
-#                     y_probs=y_probs[:, i],
-#                     out_folder=plot_dir,
-#                     model=model,
-#                     lr=lr,
-#                     bs=bs,
-#                     wd=wd,
-#                     prefix=f"{prefix}_ovr_{class_slug}",
-#                     fname_metric="roc_curve",
-#                     fold=fold,
-#                     epoch=epoch,
-#                     title=f"ROC Curve (OvR: {class_label})",
-#                 )
-#         else:
-#             print("ROC OvR disabled (ECG_PLOTS_ENABLE_OVR is False)")
-#     else:
-#         print("Skipping ROC curve — y_probs shape does not match expected format")
-
-#     # --- Calibration curve ---
-#     y_probs = np.asarray(y_probs)
-
-#     # If it's binary but probs are (n,2), use the positive-class column
-#     if len(np.unique(y_true)) == 2 and y_probs.ndim == 2 and y_probs.shape[1] == 2:
-#         y_probs = y_probs[:, 1]
-
-#     if y_probs.ndim == 1 and len(np.unique(y_true)) == 2:
-#         # Binary calibration
-#         n_bins = 10
-#         cal_path, brier = save_calibration_curve(
-#             y_true=y_true,
-#             y_probs=y_probs,
-#             out_folder=plot_dir,
-#             model=model,
-#             lr=lr,
-#             wd=wd,
-#             bs=bs,
-#             prefix="Calibration",
-#             fname_metric="calibration",
-#             n_bins=n_bins,
-#             fold=fold,
-#             epoch=epoch,
-#             title="Calibration Curve",
-#         )
-#         print(f"cal_path: {cal_path}, brier: {brier}")
-
-#     elif y_probs.ndim == 2 and y_probs.shape[1] == len(class_names):
-#         # Multiclass calibration via OvR (mirrors your PR/ROC pattern)
-#         if enable_ovr_effective:
-#             idxs = (
-#                 [i for i, c in enumerate(class_names) if c in ovr_classes_effective]
-#                 if ovr_classes_effective
-#                 else range(len(class_names))
-#             )
-#             if not idxs:
-#                 idxs = range(len(class_names))
-
-#             n_bins = 10
-#             for i in idxs:
-#                 class_label = class_names[i]
-#                 class_slug = str(class_label).lower()
-#                 y_true_bin = [1 if y == i else 0 for y in y_true]
-#                 y_probs_bin = y_probs[:, i]
-#                 cal_path, brier = save_calibration_curve(
-#                     y_true=y_true_bin,
-#                     y_probs=y_probs_bin,
-#                     out_folder=plot_dir,
-#                     model=model,
-#                     lr=lr,
-#                     wd=wd,
-#                     bs=bs,
-#                     prefix=f"{prefix}_ovr_{class_slug}",
-#                     fname_metric="calibration",
-#                     n_bins=n_bins,
-#                     fold=fold,
-#                     epoch=epoch,
-#                     title=f"Calibration Curve (OvR: {class_label})",
-#                 )
-#                 print(f"{class_label} cal_path: {cal_path}, brier: {brier}")
-#         else:
-#             print("Skipping Calibration (OvR disabled)")
-
-#     else:
-#         # Multiclass labels with 1-D probs (your test scenario) → skip cleanly
-#         print("Skipping Calibration")
-
-
 def evaluate_and_plot(
     y_true: list[int] | np.ndarray,
     y_pred: list[int] | np.ndarray,
@@ -2092,7 +1663,6 @@ def evaluate_and_plot(
     """
     # --- Validation ---
     validate_y_true_pred(y_true, y_pred)
-    print(f"y_probs type: {type(y_probs)}")
     validate_y_probs(y_probs)
 
     if not isinstance(class_names, list) or not all(
@@ -2144,20 +1714,20 @@ def evaluate_and_plot(
     report_dir.mkdir(parents=True, exist_ok=True)
     plot_dir.mkdir(parents=True, exist_ok=True)
 
-    print(
-        f"\n=== Final Evaluation (Model={model}, LR={lr}, BS={bs}, Fold={fold}, Epochs={epoch}) ==="
-    )
+    # print(
+    #     f"\n=== Final Evaluation (Model={model}, LR={lr}, BS={bs}, Fold={fold}, Epochs={epoch}) ==="
+    # )
 
-    print("Classification Report:")
-    print(
-        classification_report(
-            y_true,
-            y_pred,
-            labels=list(range(len(class_names))),
-            target_names=class_names,
-            zero_division=0,
-        )
-    )
+    # print("Classification Report:")
+    # print(
+    #     classification_report(
+    #         y_true,
+    #         y_pred,
+    #         labels=list(range(len(class_names))),
+    #         target_names=class_names,
+    #         zero_division=0,
+    #     )
+    # )
 
     # --- Save classification report and heatmap ---
     save_classification_report(
@@ -2608,3 +2178,554 @@ def evaluate_and_plot(
             )
     else:
         print("Skipping confidence histogram split — not applicable for macro mode.")
+
+
+# -----------------------------------------------------------------------------
+# SHAP helpers (optional, but clean: all imports at top, all validation inline)
+# -----------------------------------------------------------------------------
+
+
+def _validate_array_3d(
+    name: str, x: Union[np.ndarray, torch.Tensor]
+) -> Tuple[int, int, int]:
+    """
+    Validate that input is a 3D array/tensor with shape (N, C, T).
+
+    Parameters
+    ----------
+    name : str
+        Variable name for clearer error messages.
+    x : np.ndarray or torch.Tensor
+        Input to check.
+
+    Returns
+    -------
+    (N, C, T) : tuple of int
+
+    Raises
+    ------
+    TypeError
+        If input is not ndarray or Tensor.
+    ValueError
+        If not 3D or has non-positive dimensions.
+    """
+    if not isinstance(x, (np.ndarray, torch.Tensor)):
+        raise TypeError(f"{name} must be np.ndarray or torch.Tensor, got {type(x)}")
+
+    if x.ndim != 3:
+        raise ValueError(f"{name} must have shape (N, C, T), got {tuple(x.shape)}")
+
+    n, c, t = map(int, x.shape)
+    if n <= 0 or c <= 0 or t <= 0:
+        raise ValueError(f"{name} must have positive dimensions, got {n}, {c}, {t}")
+
+    return n, c, t
+
+
+def _to_tensor(x: Union[np.ndarray, torch.Tensor], name: str) -> torch.Tensor:
+    """Convert ndarray → torch.Tensor, leave tensor as-is."""
+    if isinstance(x, torch.Tensor):
+        return x
+    if isinstance(x, np.ndarray):
+        return torch.from_numpy(x)
+    raise TypeError(f"{name} must be np.ndarray or torch.Tensor, got {type(x)}")
+
+
+def _to_numpy(x: Union[np.ndarray, torch.Tensor], name: str) -> np.ndarray:
+    """Convert tensor → ndarray (CPU), leave ndarray as-is."""
+    if isinstance(x, np.ndarray):
+        return x
+    if isinstance(x, torch.Tensor):
+        return x.detach().cpu().numpy()
+    raise TypeError(f"{name} must be np.ndarray or torch.Tensor, got {type(x)}")
+
+
+def shap_sample_background(
+    data: Union[np.ndarray, torch.Tensor],
+    max_background: int = 128,
+    seed: int = 22,
+) -> torch.Tensor:
+    """
+    Subsample background examples for SHAP DeepExplainer.
+
+    Parameters
+    ----------
+    data : np.ndarray or torch.Tensor, shape (N, C, T)
+        Input signals.
+    max_background : int, default=128
+        Maximum number of background samples to keep.
+    seed : int, default=22
+        RNG seed for reproducibility.
+
+    Returns
+    -------
+    torch.Tensor, shape (B, C, T)
+        Background tensor.
+    """
+    if max_background < 1:
+        raise ValueError(f"max_background must be >=1, got {max_background}")
+
+    _validate_array_3d("data", data)
+    data_t = _to_tensor(data, "data")
+    n = int(data_t.shape[0])
+
+    if n <= max_background:
+        return data_t
+
+    rng = np.random.default_rng(seed)
+    idx = rng.choice(n, size=max_background, replace=False)
+    return data_t[idx]
+
+
+def shap_compute_values(
+    model: torch.nn.Module,
+    X: Union[np.ndarray, torch.Tensor],
+    background: Union[np.ndarray, torch.Tensor],
+    device: Optional[torch.device] = None,
+) -> Union[np.ndarray, List[np.ndarray]]:
+    """
+    Compute SHAP values for ECG CNN inputs.
+
+    Parameters
+    ----------
+    model : torch.nn.Module
+        The (trained) PyTorch model. Caller manages .eval()/.train().
+    X : np.ndarray or torch.Tensor, shape (N, C, T)
+        Inputs to explain.
+    background : np.ndarray or torch.Tensor, shape (B, C, T)
+        Background distribution for SHAP.
+    device : torch.device, optional
+        Device to run on. Defaults to the model's device.
+
+    Returns
+    -------
+    np.ndarray or list of np.ndarray
+        Binary: returns (N, C, T)  [positive-class attribution]
+        Multiclass: returns list length=K, each (N, C, T)
+
+    Raises
+    ------
+    TypeError
+        If inputs are not the expected types.
+    ValueError
+        If shapes are invalid or model outputs have unexpected shape.
+    RuntimeError
+        If SHAP explainer fails for non-recoverable reasons.
+    """
+    # --- shape/type validation for inputs ---
+    _validate_array_3d("X", X)
+    _validate_array_3d("background", background)
+
+    if not isinstance(model, torch.nn.Module):
+        raise TypeError(f"model must be torch.nn.Module, got {type(model)}")
+
+    X_t = _to_tensor(X, "X")
+    bg_t = _to_tensor(background, "background")
+
+    # --- choose device (prefer model's params device if available) ---
+    try:
+        model_param_device = next(model.parameters()).device  # may raise StopIteration
+    except StopIteration:
+        # No parameters => cannot infer device; require explicit device
+        if device is None:
+            raise ValueError("model has no parameters; cannot infer device or run SHAP")
+        model_param_device = device
+
+    dev = device or model_param_device
+    X_t = X_t.to(dev)
+    bg_t = bg_t.to(dev)
+
+    # --- validate model forward output shape with a tiny forward pass ---
+    model_was_training = model.training
+    with torch.no_grad():
+        model.eval()
+        sample_logits = model(X_t[:1])
+    # Accept (1,K) or (K,) (binary/regression-like). Anything else -> error.
+    logits_shape = tuple(int(s) for s in sample_logits.shape)
+    ok = (sample_logits.ndim == 2 and logits_shape[0] == 1) or (  # (1,K)
+        sample_logits.ndim == 1
+    )  # (K,)
+    if not ok:
+        if model_was_training:
+            model.train()
+        raise ValueError(
+            f"Expected model logits of shape (N,K) or (N,), got {logits_shape}"
+        )
+
+    # --- build explainer: try DeepExplainer; on TF import/failure, fall back to GradientExplainer ---
+    try:
+        explainer = shap.DeepExplainer(model, bg_t)
+        # Some SHAP versions require disabling additivity check with CNNs
+        shap_values = explainer.shap_values(X_t, check_additivity=False)
+    except Exception as e:
+        # Common case: DeepExplainer tries to import TensorFlow
+        msg = str(e).lower()
+        if ("tensorflow" in msg) or ("no module named 'tensorflow'" in msg):
+            try:
+                explainer = shap.GradientExplainer(model, bg_t)
+                shap_values = explainer.shap_values(X_t)
+            except Exception as ge:
+                if model_was_training:
+                    model.train()
+                raise RuntimeError(f"SHAP DeepExplainer failed: {e}") from ge
+        else:
+            if model_was_training:
+                model.train()
+            raise RuntimeError(f"SHAP DeepExplainer failed: {e}") from e
+    finally:
+        # restore training mode if needed
+        if model_was_training:
+            model.train()
+
+    # --- normalize outputs to expected shapes ---
+    def _to_np(arr: Any) -> np.ndarray:
+        return _to_numpy(arr, "shap_values")
+
+    # Case A: SHAP returns a list already (usually per-class)
+    if isinstance(shap_values, list):
+        out_list = [_to_np(sv) for sv in shap_values]
+    else:
+        arr = _to_np(shap_values)
+        # Some SHAP versions return (N,C,T,K) for multiclass
+        if arr.ndim == 4 and arr.shape[-1] > 1:
+            out_list = [arr[..., k] for k in range(arr.shape[-1])]
+        else:
+            # Binary/regression-like single map
+            out_list = [arr]
+
+    # Final contract:
+    # - If exactly 1 map -> return (N,C,T)
+    # - If exactly 2 maps -> return positive-class map (index 1)
+    # - Else -> return list length K
+    if len(out_list) == 1:
+        _validate_array_3d("shap_values", out_list[0])
+        return out_list[0]
+    if len(out_list) == 2:
+        _validate_array_3d("shap_values", out_list[1])
+        return out_list[1]
+    for m in out_list:
+        _validate_array_3d("shap_values", m)
+    return out_list
+
+
+def shap_save_channel_summary(
+    shap_values: Union[np.ndarray, List[np.ndarray]],
+    X: Union[np.ndarray, torch.Tensor],
+    out_dir: Union[str, Path],
+    filename: str,
+) -> Path:
+    """
+    Save per-channel SHAP importance (aggregated over N, T).
+
+    Parameters
+    ----------
+    shap_values : np.ndarray or list of np.ndarray
+        Binary: (N, C, T); Multiclass: list length=K, each (N, C, T).
+    X : np.ndarray or torch.Tensor, shape (N, C, T)
+        Inputs (used for shape validation only).
+    out_dir : str or Path
+        Output directory.
+    filename : str
+        Output file name.
+
+    Returns
+    -------
+    Path
+        Path to the saved PNG file.
+    """
+    if isinstance(shap_values, list):
+        if not shap_values:
+            raise ValueError("Empty shap_values list for multiclass case.")
+        mags = [np.abs(sv).mean() for sv in shap_values]
+        shap_mat = shap_values[int(np.argmax(mags))]
+    else:
+        shap_mat = shap_values
+
+    _validate_array_3d("shap_values", shap_mat)
+    _validate_array_3d("X", X)
+
+    N, C, T = shap_mat.shape
+
+    imp = np.abs(shap_mat).mean(axis=(0, 2))  # (C,)
+
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / filename
+
+    plt.figure()
+    x = np.arange(C)
+    plt.bar(x, imp)
+    plt.xlabel("Channel")
+    plt.ylabel("Mean |SHAP| over time")
+    plt.title("Channel importance (SHAP)")
+    plt.tight_layout()
+    plt.savefig(out_path)
+    plt.close()
+
+    return out_path
+
+
+def save_classification_report_csv(
+    y_true, y_pred, out_folder: Path, tag: str, fold_id: int
+) -> Path | None:
+    """
+    Save a per-fold classification report as a tidy CSV.
+
+    Generates a machine-readable classification report for one fold of training/
+    evaluation, including precision, recall, F1-score, and support for each class,
+    plus a row for the macro average. The output is stored under
+    `outputs/reports/classification_report_{tag}_fold{fold_id}.csv`.
+
+    Parameters
+    ----------
+    y_true : list[int] or np.ndarray
+        Ground-truth class labels for all samples in this fold.
+    y_pred : list[int] or np.ndarray
+        Predicted class labels for all samples in this fold.
+    out_folder : Path
+        Directory where the report CSV should be saved. Must be writable.
+    tag : str
+        Unique experiment tag identifying the model/configuration
+        (e.g., "ECGResNet_lr0001_bs64_wd00005").
+    fold_id : int
+        Fold index (1-based) for cross-validation. Must be > 0.
+
+    Returns
+    -------
+    Path or None
+        Full path to the saved CSV file, or None if validation fails or writing
+        cannot be completed.
+
+    Raises
+    ------
+    ValueError
+        If inputs are invalid: empty/unequal lengths for y_true/y_pred,
+        or non-positive fold_id.
+
+    Notes
+    -----
+    - Assumes labels are among {"CD","HYP","MI","NORM","STTC"}.
+    - Always appends a "macro avg" row for consistency across folds.
+    - Intended for downstream fold aggregation in evaluate.py.
+    """
+    if not isinstance(fold_id, int) or fold_id <= 0:
+        raise ValueError("fold_id must be a positive integer")
+    if len(y_true) != len(y_pred) or len(y_true) == 0:
+        raise ValueError("y_true and y_pred must be same non-zero length")
+
+    out_folder.mkdir(parents=True, exist_ok=True)
+
+    cr_dict = classification_report(y_true, y_pred, output_dict=True)
+    labels = ["CD", "HYP", "MI", "NORM", "STTC"]
+    header = ["label", "precision", "recall", "f1-score", "support"]
+    out_path = out_folder / f"classification_report_{tag}_fold{fold_id}.csv"
+
+    with out_path.open("w", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(header)
+        for lab in labels:
+            row = cr_dict.get(lab, {})
+            w.writerow(
+                [
+                    lab,
+                    row.get("precision"),
+                    row.get("recall"),
+                    row.get("f1-score"),
+                    row.get("support"),
+                ]
+            )
+        ma = cr_dict.get("macro avg", {})
+        w.writerow(
+            [
+                "macro avg",
+                ma.get("precision"),
+                ma.get("recall"),
+                ma.get("f1-score"),
+                ma.get("support"),
+            ]
+        )
+
+    print(f"Saved classification report CSV to {out_path}")
+
+    return out_path
+
+
+def save_fold_summary_csv(reports_dir: Path, tag: str) -> Path | None:
+    """
+    Aggregate metrics across all folds for a given tag and save to CSV.
+
+    Collects validation accuracy, validation loss, and (if available) macro-F1
+    from per-fold artifacts and writes a summary CSV:
+    `outputs/reports/fold_summary_{tag}.csv`.
+
+    Parameters
+    ----------
+    reports_dir : Path
+        Directory where reports are written (e.g., PROJECT_ROOT/outputs/reports).
+    tag : str
+        Experiment tag identifying the model/configuration (e.g.,
+        "ECGResNet_lr0001_bs64_wd00005").
+    """
+    if not isinstance(tag, str) or not tag:
+        print("save_fold_summary_csv: invalid tag provided")
+        return None
+
+    reports_dir = Path(reports_dir)
+    artifacts_dir = (
+        reports_dir.parent / "artifacts"
+    )  # artifacts/ is parallel to reports/
+    hist_dir = reports_dir.parent / "history"  # history/ is parallel to reports/
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    hist_files = sorted(
+        hist_dir.glob(f"history_{tag}_fold*.json"), key=lambda p: p.name
+    )
+    if len(hist_files) < 2:
+        print(
+            f"save_fold_summary_csv: found only {len(hist_files)} folds for tag '{tag}' — need at least 2"
+        )
+        return None
+
+    rows = []
+    accs, losses, macrof1s = [], [], []
+
+    for hf in hist_files:
+        try:
+            with hf.open("r") as fh:
+                h = json.load(fh)
+        except Exception as e:
+            print(f"save_fold_summary_csv: failed to read {hf}: {e}")
+            continue
+
+        # Your schema uses singular keys
+        val_accs = h.get("val_acc") or []
+        val_losses = h.get("val_loss") or []
+        be = h.get("best_epoch")
+
+        if be is None and val_losses:
+            try:
+                be = min(range(len(val_losses)), key=lambda i: val_losses[i])
+            except Exception as e:
+                print(
+                    f"save_fold_summary_csv: failed to resolve best_epoch in {hf}: {e}"
+                )
+                be = None
+
+        acc = (
+            float(val_accs[be])
+            if isinstance(be, int) and 0 <= be < len(val_accs)
+            else None
+        )
+        loss = (
+            float(val_losses[be])
+            if isinstance(be, int) and 0 <= be < len(val_losses)
+            else None
+        )
+
+        m = re.search(r"fold(\d+)", hf.name)
+        fold_id = int(m.group(1)) if m else -1
+
+        cr_csv = artifacts_dir / f"classification_report_{tag}_fold{fold_id}.csv"
+        macro_f1 = None
+        if cr_csv.exists():
+            try:
+                with cr_csv.open("r", newline="") as fh:
+                    rdr = csv.reader(fh)
+                    rows_csv = [r for r in rdr]
+                if rows_csv:
+                    header = rows_csv[0]
+
+                    def _col(name: str):
+                        for i, hname in enumerate(header):
+                            if (hname or "").strip().lower() == name:
+                                return i
+                        return None
+
+                    f1_i = _col("f1-score")
+                    label_i = _col("label") if _col("label") is not None else 0
+                    if f1_i is None and len(header) >= 4:
+                        f1_i = 3
+                    for r in rows_csv[1:]:
+                        if not r or f1_i is None or len(r) <= max(label_i, f1_i):
+                            continue
+                        lab = (r[label_i] or "").strip().lower()
+                        if lab.startswith("macro"):
+                            try:
+                                macro_f1 = float(r[f1_i])
+                            except Exception as e:
+                                print(
+                                    f"save_fold_summary_csv: bad macro_f1 value in {cr_csv}: {e}"
+                                )
+                            break
+            except Exception as e:
+                print(f"save_fold_summary_csv: failed to parse {cr_csv}: {e}")
+
+        rows.append(
+            {
+                "fold": fold_id,
+                "best_epoch": be,
+                "val_acc": acc,
+                "val_loss": loss,
+                "macro_f1": macro_f1,
+                "history_path": str(hf),
+                "cr_csv": str(cr_csv) if cr_csv.exists() else "",
+            }
+        )
+
+        if isinstance(acc, float):
+            accs.append(acc)
+        if isinstance(loss, float):
+            losses.append(loss)
+        if isinstance(macro_f1, float):
+            macrof1s.append(macro_f1)
+
+    def _mean_std(vals):
+        xs = [v for v in vals if isinstance(v, float)]
+        if not xs:
+            return (None, None)
+        return (statistics.mean(xs), statistics.pstdev(xs) if len(xs) > 1 else None)
+
+    mean_acc, std_acc = _mean_std(accs)
+    mean_loss, std_loss = _mean_std(losses)
+    mean_mf1, std_mf1 = _mean_std(macrof1s)
+
+    out_csv = reports_dir / f"fold_summary_{tag}.csv"
+    try:
+        with out_csv.open("w", newline="") as fh:
+            w = csv.writer(fh)
+            w.writerow(
+                [
+                    "fold",
+                    "best_epoch",
+                    "val_acc",
+                    "val_loss",
+                    "macro_f1",
+                    "history_path",
+                    "cr_csv",
+                ]
+            )
+            for r in sorted(rows, key=lambda x: x["fold"]):
+                w.writerow(
+                    [
+                        r["fold"],
+                        r["best_epoch"],
+                        r["val_acc"],
+                        r["val_loss"],
+                        r["macro_f1"],
+                        r["history_path"],
+                        r["cr_csv"],
+                    ]
+                )
+            w.writerow([])
+            w.writerow(["mean_val_acc", mean_acc])
+            w.writerow(["std_val_acc", std_acc])
+            w.writerow(["mean_val_loss", mean_loss])
+            w.writerow(["std_val_loss", std_loss])
+            w.writerow(["mean_macro_f1", mean_mf1])
+            w.writerow(["std_macro_f1", std_mf1])
+    except Exception as e:
+        print(f"save_fold_summary_csv: failed to write {out_csv}: {e}")
+        return None
+
+    print(f"Saved fold summary CSV to {out_csv}")
+    return out_csv

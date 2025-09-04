@@ -1,0 +1,62 @@
+[
+  {
+    "loss": 1.0143426800411564,
+    "elapsed_min": 9.079988630612691,
+    "fold": 1,
+    "model": "ECGConvNet",
+    "model_path": "/home/pbeach/Dropbox/VT-MIT/Projects/ecg_cnn_pytorch/outputs/models/model_best_ECGConvNet_lr00001_bs64_wd0_fold1.pth",
+    "best_epoch": 16,
+    "train_losses": 0.9179648752859098,
+    "val_losses": 1.0155715157315874,
+    "train_accs": 0.684895983403446,
+    "val_accs": 0.6669739571329799
+  },
+  {
+    "loss": 1.0184895356670176,
+    "elapsed_min": 12.523645989100139,
+    "fold": 2,
+    "model": "ECGConvNet",
+    "model_path": "/home/pbeach/Dropbox/VT-MIT/Projects/ecg_cnn_pytorch/outputs/models/model_best_ECGConvNet_lr00001_bs64_wd0_fold2.pth",
+    "best_epoch": 24,
+    "train_losses": 0.908107127005282,
+    "val_losses": 1.0206957750947938,
+    "train_accs": 0.7013772834668357,
+    "val_accs": 0.6743489283244988
+  },
+  {
+    "loss": 1.0170913582960546,
+    "elapsed_min": 9.918659349282583,
+    "fold": 3,
+    "model": "ECGConvNet",
+    "model_path": "/home/pbeach/Dropbox/VT-MIT/Projects/ecg_cnn_pytorch/outputs/models/model_best_ECGConvNet_lr00001_bs64_wd0_fold3.pth",
+    "best_epoch": 18,
+    "train_losses": 0.8706421356837541,
+    "val_losses": 1.0376045930599935,
+    "train_accs": 0.7023740924282587,
+    "val_accs": 0.6814200092208391
+  },
+  {
+    "loss": 1.01795709336502,
+    "elapsed_min": 10.377597947915396,
+    "fold": 4,
+    "model": "ECGConvNet",
+    "model_path": "/home/pbeach/Dropbox/VT-MIT/Projects/ecg_cnn_pytorch/outputs/models/model_best_ECGConvNet_lr00001_bs64_wd0_fold4.pth",
+    "best_epoch": 19,
+    "train_losses": 0.8564296006345798,
+    "val_losses": 1.0199547411660106,
+    "train_accs": 0.7096346663593408,
+    "val_accs": 0.6830336560627017
+  },
+  {
+    "loss": 1.027709010835615,
+    "elapsed_min": 13.790050800641378,
+    "fold": 5,
+    "model": "ECGConvNet",
+    "model_path": "/home/pbeach/Dropbox/VT-MIT/Projects/ecg_cnn_pytorch/outputs/models/model_best_ECGConvNet_lr00001_bs64_wd0_fold5.pth",
+    "best_epoch": 24,
+    "train_losses": 0.8735307466259774,
+    "val_losses": 1.0311190761031506,
+    "train_accs": 0.7085974415120433,
+    "val_accs": 0.6627478100507146
+  }
+]

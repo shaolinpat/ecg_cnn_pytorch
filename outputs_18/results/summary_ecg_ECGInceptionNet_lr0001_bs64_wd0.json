@@ -1,0 +1,62 @@
+[
+  {
+    "loss": 0.9112358481468048,
+    "elapsed_min": 51.16854515870412,
+    "fold": 1,
+    "model": "ECGInceptionNet",
+    "model_path": "/home/pbeach/Dropbox/VT-MIT/Projects/ecg_cnn_pytorch/outputs/models/model_best_ecg_ECGInceptionNet_lr0001_bs64_wd0_fold1.pth",
+    "best_epoch": 15,
+    "train_losses": 0.6932216280785678,
+    "val_losses": 0.9252334420212295,
+    "train_accs": 0.7624618221633147,
+    "val_accs": 0.7075362986863333
+  },
+  {
+    "loss": 0.9116899419363865,
+    "elapsed_min": 51.10327206055323,
+    "fold": 2,
+    "model": "ECGInceptionNet",
+    "model_path": "/home/pbeach/Dropbox/VT-MIT/Projects/ecg_cnn_pytorch/outputs/models/model_best_ecg_ECGInceptionNet_lr0001_bs64_wd0_fold2.pth",
+    "best_epoch": 15,
+    "train_losses": 0.699322023893484,
+    "val_losses": 0.92008636519227,
+    "train_accs": 0.7623465683167175,
+    "val_accs": 0.6983175846969347
+  },
+  {
+    "loss": 0.9292623793930433,
+    "elapsed_min": 53.698598595460254,
+    "fold": 3,
+    "model": "ECGInceptionNet",
+    "model_path": "/home/pbeach/Dropbox/VT-MIT/Projects/ecg_cnn_pytorch/outputs/models/model_best_ecg_ECGInceptionNet_lr0001_bs64_wd0_fold3.pth",
+    "best_epoch": 16,
+    "train_losses": 0.6857924856416391,
+    "val_losses": 0.9495120871830998,
+    "train_accs": 0.7674887633974876,
+    "val_accs": 0.706777316735823
+  },
+  {
+    "loss": 0.9693350849090056,
+    "elapsed_min": 49.37537421385447,
+    "fold": 4,
+    "model": "ECGInceptionNet",
+    "model_path": "/home/pbeach/Dropbox/VT-MIT/Projects/ecg_cnn_pytorch/outputs/models/model_best_ecg_ECGInceptionNet_lr0001_bs64_wd0_fold4.pth",
+    "best_epoch": 13,
+    "train_losses": 0.7023226823745764,
+    "val_losses": 1.0425874656551497,
+    "train_accs": 0.7628788751872767,
+    "val_accs": 0.6973259566620562
+  },
+  {
+    "loss": 0.9241648205088382,
+    "elapsed_min": 51.5724263548851,
+    "fold": 5,
+    "model": "ECGInceptionNet",
+    "model_path": "/home/pbeach/Dropbox/VT-MIT/Projects/ecg_cnn_pytorch/outputs/models/model_best_ecg_ECGInceptionNet_lr0001_bs64_wd0_fold5.pth",
+    "best_epoch": 15,
+    "train_losses": 0.6826157775345082,
+    "val_losses": 0.9619563926250059,
+    "train_accs": 0.7663939149475625,
+    "val_accs": 0.7017058552328261
+  }
+]

@@ -1,3 +1,5 @@
+# training/cli_args.py
+
 import argparse
 
 from argparse import Namespace
@@ -8,9 +10,14 @@ from ecg_cnn.config.config_loader import TrainConfig
 from ecg_cnn.utils.validate import validate_hparams_config
 
 
-def parse_args():
+def parse_training_args(argv=None):
     """
-    Parse command-line arguments for ECG training or evaluation scripts.
+    Parse command-line arguments for ECG training.py.
+
+    Parameters
+    ----------
+    argv : list[str] | None
+        If None, uses sys.argv[1:]; otherwise parse the provided list.
 
     Returns
     -------
@@ -40,7 +47,7 @@ def parse_args():
 
     Notes
     -----
-    This function is used by CLI entry points like train.py and evaluate.py to configure
+    This function is used by the CLI entry point to train.py to configure
     runtime behavior, such as model hyperparameters, input sampling, and override values
     from baseline.yaml without modifying the original configuration file.
     """
@@ -161,7 +168,143 @@ def parse_args():
         help="Total number of folds to use for cross-validation (e.g., 5 for 5-fold CV). Default is 1.",
     )
 
-    return p.parse_args()
+    return p.parse_args(argv)
+
+
+def parse_evaluate_args(argv=None):
+    """
+    Parse command-line arguments for ECG evaluate.py.
+
+    Parameters
+    ----------
+    argv : list[str] | None
+        If None, uses sys.argv[1:]; otherwise parse the provided list.
+
+    Returns
+    -------
+    argparse.Namespace
+        Parsed command-line arguments with the following attributes:
+
+        - fold (int or None): 1-based fold index to evaluate. If None, evaluates
+          the best run across all folds or follows the evaluator's default.
+
+        OvR (one-vs-rest) controls:
+        - enable_ovr (bool or None): Force-enable OvR plots. If None, defer to config.
+        - ovr_classes (List[str] or None): Specific classes for OvR analysis.
+          Implies --enable_ovr unless --disable_ovr is set.
+
+        SHAP configuration:
+        - shap_profile (str): SHAP profile ("off", "fast", "medium", "thorough", "custom").
+        - shap_n (int or None): Number of samples to explain (custom mode only).
+        - shap_bg (int or None): Background size (custom mode only).
+        - shap_stride (int or None): Time downsample stride (::k) (custom mode only).
+
+        Run selection:
+        - prefer (str): Which config to evaluate.
+          Choices:
+            * "auto": Prefer accuracy if available, else loss (default).
+            * "accuracy": Always pick best-by-accuracy if recorded.
+            * "loss": Always pick best-by-loss if recorded.
+            * "latest": Ignore "best" records; use newest config on disk.
+
+    Notes
+    -----
+    This function is used by the CLI entry point to evaluate.py to control
+    evaluation behavior, including fold selection, one-vs-rest diagnostics,
+    SHAP explainability trade-offs, and whether to load the best or latest
+    available training configuration for analysis.
+    """
+    p = argparse.ArgumentParser(
+        description="Evaluate the most recent training config (or a forced fold).",
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
+
+    p.add_argument(
+        "--fold",
+        type=int,
+        default=None,
+        help="Optional 1-based fold index. If omitted, evaluate the selected run across all folds "
+        "or follow the evaluator's default (best-by-metric).",
+    )
+
+    # OvR controls (mutually exclusive enable/disable)
+    group = p.add_mutually_exclusive_group()
+    group.add_argument(
+        "--enable_ovr",
+        dest="enable_ovr",
+        action="store_const",
+        const=True,
+        default=None,  # None = no CLI override; defer to config
+        help="Enable one-vs-rest plots. Overrides config.",
+    )
+    group.add_argument(
+        "--disable_ovr",
+        dest="enable_ovr",
+        action="store_const",
+        const=False,
+        help="Disable one-vs-rest plots. Overrides config.",
+    )
+    p.add_argument(
+        "--ovr_classes",
+        type=lambda s: [x.strip() for x in s.split(",") if x.strip()],
+        metavar="CLASS[,CLASS...]",
+        default=None,
+        help=(
+            "Comma-separated class names for OvR analysis (e.g., 'MI,NORM').\n"
+            "Implies --enable_ovr unless --disable_ovr is set."
+        ),
+    )
+
+    # SHAP controls
+    p.add_argument(
+        "--shap",
+        dest="shap_profile",
+        choices=["off", "fast", "medium", "thorough", "custom"],
+        default="medium",
+        help=(
+            "SHAP profile to bound runtime:\n"
+            "  off      Disable SHAP\n"
+            "  fast     Small sample sizes\n"
+            "  medium   Balanced defaults (default)\n"
+            "  thorough Larger samples, slower\n"
+            "  custom   Use --shap-n / --shap-bg / --shap-stride"
+        ),
+    )
+    p.add_argument(
+        "--shap-n",
+        type=int,
+        default=None,
+        help="Custom number of samples to explain. Requires --shap custom.",
+    )
+    p.add_argument(
+        "--shap-bg",
+        type=int,
+        default=None,
+        help="Custom background size. Requires --shap custom.",
+    )
+    p.add_argument(
+        "--shap-stride",
+        type=int,
+        default=None,
+        help="Custom time downsample stride (::k). Requires --shap custom.",
+    )
+
+    # Selection of which run/config is preferred
+    p.add_argument(
+        "--prefer",
+        choices=["auto", "accuracy", "loss", "latest"],
+        default="auto",
+        metavar="MODE",
+        help=(
+            "Which config to evaluate:\n"
+            "  auto      Prefer accuracy if available, else loss (default)\n"
+            "  accuracy  Always pick best-by-accuracy if recorded\n"
+            "  loss      Always pick best-by-loss if recorded\n"
+            "  latest    Ignore 'best' records; use newest config on disk"
+        ),
+    )
+
+    return p.parse_args(argv)
 
 
 def _positive_int(value):

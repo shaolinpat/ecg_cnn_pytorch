@@ -1,24 +1,18 @@
-################################################################################
-#
-# PTB-XL loading and metadata helpers
-#
-################################################################################
-
+# data/data_utils.py
 
 import ast
-import json
 import numpy as np
 import os
 import pandas as pd
 import wfdb
-import torch
 
-from collections import Counter
 from pathlib import Path
-from torch.utils.data import Dataset
-from typing import Optional
 
 from ecg_cnn.paths import PROJECT_ROOT, PTBXL_DATA_DIR
+
+# ------------------------------------------------------------------------------
+# globals
+# ------------------------------------------------------------------------------
 
 SEED = 22
 
@@ -29,7 +23,6 @@ FIVE_SUPERCLASSES = ["CD", "HYP", "MI", "NORM", "STTC"]
 # Note: these would need to be confirmed by subject matter experts
 
 RAW2SUPER = {
-    # ---------- ORIGINAL MAPPINGS (unchanged) ----------
     # NORM is already normal
     "NORM": "NORM",  # normal sinus rhythm
     # Myocardial infarction / infarct-related codes -> MI
@@ -138,6 +131,10 @@ RAW2SUPER = {
 # Map each super-label to an integer index 0..4
 LABEL2IDX = {"CD": 0, "HYP": 1, "MI": 2, "NORM": 3, "STTC": 4}
 
+# ------------------------------------------------------------------------------
+# helpers
+# ------------------------------------------------------------------------------
+
 
 def build_full_X_y(meta_csv, scp_csv, ptb_path):
     """
@@ -181,9 +178,9 @@ def build_full_X_y(meta_csv, scp_csv, ptb_path):
     # Normalize path input
     ptb_path = Path(ptb_path)
 
-    # -----------------------------
+    # --------------------------------------------------------------------------
     # Input validation
-    # -----------------------------
+    # --------------------------------------------------------------------------
     if not os.path.isfile(meta_csv):
         raise FileNotFoundError(f"Metadata CSV not found: {meta_csv}")
 
@@ -193,9 +190,9 @@ def build_full_X_y(meta_csv, scp_csv, ptb_path):
     if not ptb_path.is_dir():
         raise NotADirectoryError(f"PTB-XL root directory not found: {ptb_path}")
 
-    # -----------------------------
+    # --------------------------------------------------------------------------
     # Load metadata
-    # -----------------------------
+    # --------------------------------------------------------------------------
     sample_meta = pd.read_csv(
         meta_csv, index_col="ecg_id", converters={"scp_codes": ast.literal_eval}
     )
@@ -361,15 +358,15 @@ def load_ptbxl_meta(ptb_path):
     # Normalize path input
     ptb_path = Path(ptb_path)
 
-    # -----------------------------
+    # --------------------------------------------------------------------------
     # Input validation
-    # -----------------------------
+    # --------------------------------------------------------------------------
     if not os.path.isdir(ptb_path):
         raise NotADirectoryError(f"Input not a directory: {ptb_path}")
 
-    # -----------------------------
+    # --------------------------------------------------------------------------
     # Build the DataFrame
-    # -----------------------------
+    # --------------------------------------------------------------------------
     meta_csv = os.path.join(ptb_path, "ptbxl_database.csv")
     df = pd.read_csv(
         meta_csv, index_col="ecg_id", converters={"scp_codes": ast.literal_eval}
@@ -427,9 +424,9 @@ def load_ptbxl_sample(sample_dir, ptb_path):
     - Assumes that ECG signal files are in CSV format with 12 columns (one per lead).
     """
 
-    # ----------------------------------------
+    # --------------------------------------------------------------------------
     # Resolve defaults and normalize path inputs
-    # ----------------------------------------
+    # --------------------------------------------------------------------------
 
     # sample_dir: allow None -> default to repo's data/sample
     if sample_dir is None:
@@ -447,9 +444,9 @@ def load_ptbxl_sample(sample_dir, ptb_path):
     else:
         raise TypeError(f"ptb_path must be str|Path|None, got {type(ptb_path)}")
 
-    # -----------------------------
+    # --------------------------------------------------------------------------
     # Input validation
-    # -----------------------------
+    # --------------------------------------------------------------------------
     if not sample_dir.is_dir():
         raise NotADirectoryError(f"Input not a directory: {sample_dir}")
 
@@ -555,7 +552,6 @@ def load_ptbxl_full(data_dir, subsample_frac, sampling_rate=100):
     - Label mapping is handled by an external helper: `raw_to_five_class()`.
     - Reproducible subsampling is achieved using global SEED = 22.
     """
-    SEED = 22
 
     # Normalize and validate inputs
     data_dir = Path(data_dir)

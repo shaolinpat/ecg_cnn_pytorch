@@ -1,0 +1,17 @@
+batch_size: 64
+config: configs/grid_18.yaml
+data_dir: null
+lr: 0.0005
+model: ECGConvNet
+n_epochs: 50
+n_folds: 5
+plots_enable_ovr: false
+plots_ovr_classes: []
+sample_dir: null
+sample_only: false
+sampling_rate: 100
+save_best: true
+subsample_frac: 1.0
+tag: ecg_ECGConvNet_lr0005_bs64_wd0005
+verbose: true
+weight_decay: 0.0005

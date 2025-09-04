@@ -9,6 +9,7 @@ matplotlib
 seaborn
 wfdb
 tqdm
+shap>=0.45
 
 # Jupyter tools (Colab includes most already)
 jupyter

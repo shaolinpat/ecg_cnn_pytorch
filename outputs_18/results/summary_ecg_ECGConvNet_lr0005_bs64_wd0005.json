@@ -1,0 +1,62 @@
+[
+  {
+    "loss": 0.9957652148164123,
+    "elapsed_min": 11.752690351009369,
+    "fold": 1,
+    "model": "ECGConvNet",
+    "model_path": "/home/pbeach/Dropbox/VT-MIT/Projects/ecg_cnn_pytorch/outputs/models/model_best_ecg_ECGConvNet_lr0005_bs64_wd0005_fold1.pth",
+    "best_epoch": 22,
+    "train_losses": 0.8465802012235639,
+    "val_losses": 1.0113833437429702,
+    "train_accs": 0.7137094450527286,
+    "val_accs": 0.6867941922101867
+  },
+  {
+    "loss": 1.0070529004949995,
+    "elapsed_min": 10.38481164375941,
+    "fold": 2,
+    "model": "ECGConvNet",
+    "model_path": "/home/pbeach/Dropbox/VT-MIT/Projects/ecg_cnn_pytorch/outputs/models/model_best_ecg_ECGConvNet_lr0005_bs64_wd0005_fold2.pth",
+    "best_epoch": 19,
+    "train_losses": 0.8739724824155558,
+    "val_losses": 1.0072922582559307,
+    "train_accs": 0.7095026796519334,
+    "val_accs": 0.6736575247752938
+  },
+  {
+    "loss": 1.0244226377094985,
+    "elapsed_min": 12.589907050132751,
+    "fold": 3,
+    "model": "ECGConvNet",
+    "model_path": "/home/pbeach/Dropbox/VT-MIT/Projects/ecg_cnn_pytorch/outputs/models/model_best_ecg_ECGConvNet_lr0005_bs64_wd0005_fold3.pth",
+    "best_epoch": 24,
+    "train_losses": 0.8239686753434685,
+    "val_losses": 1.086052152076148,
+    "train_accs": 0.7145902961853176,
+    "val_accs": 0.6775011526048871
+  },
+  {
+    "loss": 1.051540252963427,
+    "elapsed_min": 13.204281290372213,
+    "fold": 4,
+    "model": "ECGConvNet",
+    "model_path": "/home/pbeach/Dropbox/VT-MIT/Projects/ecg_cnn_pytorch/outputs/models/model_best_ecg_ECGConvNet_lr0005_bs64_wd0005_fold4.pth",
+    "best_epoch": 25,
+    "train_losses": 0.842998261239873,
+    "val_losses": 1.1012347359819972,
+    "train_accs": 0.7142445545695517,
+    "val_accs": 0.6772706316274781
+  },
+  {
+    "loss": 1.0045104877582725,
+    "elapsed_min": 13.410468832651775,
+    "fold": 5,
+    "model": "ECGConvNet",
+    "model_path": "/home/pbeach/Dropbox/VT-MIT/Projects/ecg_cnn_pytorch/outputs/models/model_best_ecg_ECGConvNet_lr0005_bs64_wd0005_fold5.pth",
+    "best_epoch": 26,
+    "train_losses": 0.7922638143772655,
+    "val_losses": 1.0448309422198832,
+    "train_accs": 0.7386769620836695,
+    "val_accs": 0.6770401106500692
+  }
+]

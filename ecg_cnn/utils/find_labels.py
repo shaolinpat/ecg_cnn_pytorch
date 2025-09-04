@@ -1,5 +1,4 @@
-# This script is for exploratory label inspection and shape debugging only.
-# It is not imported or used in the training pipeline.
+# utils/find_labels.py
 
 import pandas as pd
 import torch
@@ -14,8 +13,6 @@ for lst in df_meta["scp_codes"]:
     all_raw.update(lst)
 print("ALL raw labels in PTB-XL:", sorted(all_raw))
 
-
-# L_out = (L_in + 2*pad - kernel_size) / stride + 1
 
 x = torch.randn(1, 12, 1000)
 conv1 = nn.Conv1d(12, 64, kernel_size=16, padding=7)

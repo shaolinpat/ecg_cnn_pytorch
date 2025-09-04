@@ -124,7 +124,7 @@ def patch_paths(monkeypatch, tmp_path: Path):
     per-test temp folders. Creates the common subdirs that code expects.
 
     Returns:
-        (results_dir, history_dir, models_dir, output_dir, plots_dir, ptbxl_dir, cache_dir)
+        (results_dir, history_dir, models_dir, output_dir, plots_dir, ptbxl_dir, arifacts_dir)
     """
     # Canonical temp directories
     results_dir = tmp_path / "results"
@@ -133,7 +133,7 @@ def patch_paths(monkeypatch, tmp_path: Path):
     output_dir = tmp_path / "output"
     plots_dir = tmp_path / "plots"
     ptbxl_dir = tmp_path / "ptbxl"
-    cache_dir = tmp_path / "cache"
+    arifacts_dir = tmp_path / "artifacts"
 
     # Create them so any code that writes will succeed
     for p in (
@@ -143,7 +143,7 @@ def patch_paths(monkeypatch, tmp_path: Path):
         output_dir,
         plots_dir,
         ptbxl_dir,
-        cache_dir,
+        arifacts_dir,
     ):
         p.mkdir(parents=True, exist_ok=True)
 
@@ -154,7 +154,7 @@ def patch_paths(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(paths, "OUTPUT_DIR", output_dir, raising=False)
     monkeypatch.setattr(paths, "PLOTS_DIR", plots_dir, raising=False)
     monkeypatch.setattr(paths, "PTBXL_DATA_DIR", ptbxl_dir, raising=False)
-    monkeypatch.setattr(paths, "CACHE_DIR", cache_dir, raising=False)
+    monkeypatch.setattr(paths, "ARTIFACTS_DIR", arifacts_dir, raising=False)
     # Some code may rely on a project root—point it at tmp_path if present
     if hasattr(paths, "PROJECT_ROOT"):
         monkeypatch.setattr(paths, "PROJECT_ROOT", tmp_path, raising=False)
@@ -174,8 +174,10 @@ def patch_paths(monkeypatch, tmp_path: Path):
             monkeypatch.setattr(data_utils, "OUTPUT_DIR", output_dir, raising=False)
         if hasattr(data_utils, "PLOTS_DIR"):
             monkeypatch.setattr(data_utils, "PLOTS_DIR", plots_dir, raising=False)
-        if hasattr(data_utils, "CACHE_DIR"):
-            monkeypatch.setattr(data_utils, "CACHE_DIR", cache_dir, raising=False)
+        if hasattr(data_utils, "ARTIFACTS_DIR"):
+            monkeypatch.setattr(
+                data_utils, "ARTIFACTS_DIR", arifacts_dir, raising=False
+            )
     except Exception:
         # If data_utils isn't imported anywhere in the suite, skip silently.
         pass
@@ -199,7 +201,7 @@ def patch_paths(monkeypatch, tmp_path: Path):
             ("OUTPUT_DIR", output_dir),
             ("PLOTS_DIR", plots_dir),
             ("PTBXL_DATA_DIR", ptbxl_dir),
-            ("CACHE_DIR", cache_dir),
+            ("ARTIFACTS_DIR", arifacts_dir),
             ("PROJECT_ROOT", tmp_path),
         ):
             if hasattr(mod, attr):
@@ -212,7 +214,7 @@ def patch_paths(monkeypatch, tmp_path: Path):
         output_dir,
         plots_dir,
         ptbxl_dir,
-        cache_dir,
+        arifacts_dir,
     )
 
 

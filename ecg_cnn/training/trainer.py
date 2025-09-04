@@ -1,10 +1,16 @@
+# training/trainer.py
+
+import csv
 import json
+import os
 import numpy as np
+import re
 import time
 import torch
 import torch.nn as nn
 
 from pathlib import Path
+from sklearn.metrics import classification_report
 from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import LabelEncoder
 from torch.utils.data import DataLoader, TensorDataset
@@ -17,8 +23,14 @@ from ecg_cnn.data.data_utils import (
     load_ptbxl_full,
 )
 from ecg_cnn.models import model_utils
-from ecg_cnn.paths import HISTORY_DIR, MODELS_DIR, PTBXL_DATA_DIR
-from ecg_cnn.training.training_utils import compute_class_weights
+from ecg_cnn.paths import (
+    HISTORY_DIR,
+    MODELS_DIR,
+    ARTIFACTS_DIR,
+    PTBXL_DATA_DIR,
+)
+from ecg_cnn.training import training_utils
+from torch.optim.lr_scheduler import OneCycleLR
 
 
 # ------------------------------------------------------------------------------
@@ -36,7 +48,7 @@ _DATASET_CACHE = {}
 # ------------------------------------------------------------------------------
 
 
-def train_one_epoch(model, dataloader, optimizer, criterion, device):
+def train_one_epoch(model, dataloader, optimizer, criterion, device, scheduler=None):
     """
     Trains the model for one epoch on the given dataloader.
 
@@ -85,14 +97,22 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device):
     total = 0
 
     for X_batch, y_batch in dataloader:
-        X_batch = X_batch.to(device)
-        y_batch = y_batch.to(device)
+        # X_batch = X_batch.to(device)
+        # y_batch = y_batch.to(device)
+
+        # [perf] non_blocking only matters when pin_memory=True and device is CUDA
+        X_batch = X_batch.to(device, non_blocking=True)  # [perf]
+        y_batch = y_batch.to(device, non_blocking=True)  # [perf]
 
         optimizer.zero_grad()
         outputs = model(X_batch)
         loss = criterion(outputs, y_batch)
         loss.backward()
         optimizer.step()
+
+        # OneCycle is stepped per-batch; others are epoch-level.
+        if scheduler is not None and isinstance(scheduler, OneCycleLR):
+            scheduler.step()
 
         total_loss += loss.item() * X_batch.size(0)
         _, predicted = torch.max(outputs, 1)
@@ -149,8 +169,12 @@ def evaluate_on_validation(model, dataloader, criterion, device):
 
     with torch.no_grad():
         for X_batch, y_batch in dataloader:
-            X_batch = X_batch.to(device)
-            y_batch = y_batch.to(device)
+            # X_batch = X_batch.to(device)
+            # y_batch = y_batch.to(device)
+
+            # [perf] non_blocking only matters when pin_memory=True and device is CUDA
+            X_batch = X_batch.to(device, non_blocking=True)  # [perf]
+            y_batch = y_batch.to(device, non_blocking=True)  # [perf]
 
             outputs = model(X_batch)
             loss = criterion(outputs, y_batch)
@@ -164,46 +188,6 @@ def evaluate_on_validation(model, dataloader, criterion, device):
     accuracy = correct / total
 
     return avg_loss, accuracy
-
-
-def compute_class_weights(y: np.ndarray, num_classes: int) -> torch.Tensor:
-    """
-    Compute inverse frequency-based class weights for use with nn.CrossEntropyLoss.
-
-    Parameters
-    ----------
-    y : np.ndarray
-        1D array of integer class labels (shape: [n_samples]).
-    num_classes : int
-        Total number of classes. Must be >= max(y) + 1.
-
-    Returns
-    -------
-    torch.Tensor
-        Tensor of shape [num_classes] with higher weights for minority classes.
-
-    Raises
-    ------
-    ValueError
-        If input is not a valid 1D array of integers, or if num_classes is invalid.
-    """
-    if not isinstance(y, np.ndarray):
-        raise ValueError(f"y must be a numpy ndarray, got {type(y)}")
-    if y.ndim != 1:
-        raise ValueError("y must be a 1D array of class labels")
-    if not np.issubdtype(y.dtype, np.integer):
-        raise ValueError("y must contain integer class labels")
-    if not isinstance(num_classes, int) or num_classes < 1:
-        raise ValueError("num_classes must be a positive integer")
-    if y.max() >= num_classes:
-        raise ValueError("num_classes must be greater than max(y)")
-
-    counts = np.bincount(y, minlength=num_classes)
-    total = counts.sum()
-    with np.errstate(divide="ignore", invalid="ignore"):
-        weights = total / (num_classes * counts)
-
-    return torch.tensor(weights, dtype=torch.float32)
 
 
 def run_training(
@@ -287,44 +271,47 @@ def run_training(
 
     t0 = time.time()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    use_cuda = device.type == "cuda"
 
     # Load and preprocess data
     data_dir = Path(config.data_dir) if config.data_dir else PTBXL_DATA_DIR
 
     # ----------------------------------------------------------------------
-    # NEW: cache dataset in-process so folds/runs reuse the same arrays
+    # Cache dataset in-process so folds/runs reuse the same arrays
     # Key includes only data-affecting fields (not model/hparams).
     # ----------------------------------------------------------------------
     if config.sample_only:
         key = (
             str(Path(config.sample_dir).resolve()) if config.sample_dir else "None",
-            "sample_only",
+            "SAMPLE_ONLY",
             int(config.sampling_rate),
         )
+        cached = _DATASET_CACHE.get(key)
+        if cached is not None:
+            X, y, meta = cached
+        else:
+            # NOTE: tests expect these exact named args; do not change them here.
+            X, y, meta = load_ptbxl_sample(
+                sample_dir=config.sample_dir,
+                ptb_path=data_dir,
+            )
+            _DATASET_CACHE[key] = (X, y, meta)
     else:
         key = (
             str(data_dir.resolve()),
             float(config.subsample_frac),
             int(config.sampling_rate),
         )
-
-    cached = _DATASET_CACHE.get(key)
-    if cached is not None:
-        X, y, meta = cached
-    else:
-        if config.sample_only:
-            X, y, meta = load_ptbxl_sample(
-                sample_dir=config.sample_dir,
-                ptb_path=data_dir,
-            )
+        cached = _DATASET_CACHE.get(key)
+        if cached is not None:
+            X, y, meta = cached
         else:
             X, y, meta = load_ptbxl_full(
                 data_dir=data_dir,
                 subsample_frac=config.subsample_frac,
                 sampling_rate=config.sampling_rate,
             )
-        _DATASET_CACHE[key] = (X, y, meta)
-    # ----------------------------------------------------------------------
+            _DATASET_CACHE[key] = (X, y, meta)
 
     # Drop unknowns
     keep = np.array([lbl != "Unknown" for lbl in y], dtype=bool)
@@ -349,23 +336,38 @@ def run_training(
         train_idx, val_idx = splits[fold_idx]
         train_dataset = TensorDataset(X_tensor[train_idx], y_tensor[train_idx])
         val_dataset = TensorDataset(X_tensor[val_idx], y_tensor[val_idx])
+
+        # pin_memory is a no-op on CPU and speeds H2D transfer on CUDA
         dataloader = DataLoader(
-            train_dataset, batch_size=config.batch_size, shuffle=True
+            train_dataset,
+            batch_size=config.batch_size,
+            shuffle=True,
+            pin_memory=use_cuda,
         )
-        val_dataloader = DataLoader(val_dataset, batch_size=config.batch_size)
+        val_dataloader = DataLoader(
+            val_dataset,
+            batch_size=config.batch_size,
+            pin_memory=use_cuda,
+        )
         print(
             f"Fold {fold_idx + 1} of {config.n_folds}: {len(train_idx)} train / {len(val_idx)} val samples"
         )
 
     else:
         dataset = TensorDataset(X_tensor, y_tensor)
-        dataloader = DataLoader(dataset, batch_size=config.batch_size, shuffle=True)
+        dataloader = DataLoader(
+            dataset,
+            batch_size=config.batch_size,
+            shuffle=True,
+            pin_memory=use_cuda,
+        )
         val_dataloader = None
-        print(f"No folds: {len(dataset)} total samples")
+        # print(f"No folds: {len(dataset)} total samples")
 
     # --------------------------------------------------------------------------
     # Model and optimizer
     # --------------------------------------------------------------------------
+    # Use getattr(..., None) so we can raise a clean ValueError for tests
     model_cls = getattr(model_utils, config.model, None)
     if model_cls is None:
         raise ValueError(f"Unknown model name: {config.model}")
@@ -375,18 +377,55 @@ def run_training(
         model.parameters(), lr=config.lr, weight_decay=config.weight_decay
     )
 
-    if fold_idx is not None:
-        y_src = y_tensor[train_idx]
-    else:
-        y_src = y_tensor
+    # --------------------------------------------------------------------------
+    # Loss: class-weighted CrossEntropy (weights from training fold)
+    # --------------------------------------------------------------------------
+    y_src = y_tensor[train_idx] if fold_idx is not None else y_tensor
     y_train_np = y_src.numpy()
     num_classes = len(np.unique(y_train_np))
-    class_weights = compute_class_weights(y_train_np, num_classes)  # numpy -> torch
-    class_weights = torch.tensor(class_weights, dtype=torch.float32, device=device)
+    # training_utils.compute_class_weights returns a torch.Tensor; just move to device
+    class_weights = training_utils.compute_class_weights(y_train_np, num_classes).to(
+        device
+    )
     criterion = nn.CrossEntropyLoss(weight=class_weights)
+
+    # --------------------------------------------------------------------------
+    # Scheduler selection (default: ReduceLROnPlateau; optional Cosine/OneCycle via ENV)
+    #   ECG_SCHEDULER: "", "cosine", or "onecycle"
+    #   ECG_SCHED_TMAX: int (cosine; default = n_epochs)
+    #   ECG_SCHED_MAX_LR: float (onecycle; default = config.lr)
+    #   ECG_SCHED_PCT_START: float (onecycle; default 0.3)
+    #   ECG_SCHED_DIV: float (onecycle; default 25.0)
+    #   ECG_SCHED_FINAL_DIV: float (onecycle; default 1e4)
+    # --------------------------------------------------------------------------
+    _sched_name = os.getenv("ECG_SCHEDULER", "").strip().lower()
+    if _sched_name == "cosine":
+        _tmax = int(os.getenv("ECG_SCHED_TMAX", str(config.n_epochs)))
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=_tmax)
+    elif _sched_name == "onecycle":
+        _max_lr = float(os.getenv("ECG_SCHED_MAX_LR", str(config.lr)))
+        _pct = float(os.getenv("ECG_SCHED_PCT_START", "0.3"))
+        _div = float(os.getenv("ECG_SCHED_DIV", "25.0"))
+        _final = float(os.getenv("ECG_SCHED_FINAL_DIV", "10000"))
+        steps_per_epoch = len(dataloader)
+        scheduler = torch.optim.lr_scheduler.OneCycleLR(
+            optimizer,
+            max_lr=_max_lr,
+            epochs=int(config.n_epochs),
+            steps_per_epoch=steps_per_epoch,
+            pct_start=_pct,
+            div_factor=_div,
+            final_div_factor=_final,
+        )
+    else:
+        # Scheduler (ReduceLROnPlateau) — no 'verbose' kw for this torch version
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode="min", factor=0.5, patience=2, min_lr=1e-6
+        )
 
     best_loss = float("inf")
     best_epoch = -1
+    model_path = None  # ensure defined even if no improvement
 
     history = {
         "train_loss": [],
@@ -395,21 +434,58 @@ def run_training(
         "val_acc": [],
     }
 
+    # --------------------------------------------------------------------------
+    # Training loop with early stopping
+    # --------------------------------------------------------------------------
+    best_state = None
+    bad_epochs = 0
+    patience = 5
+
     for epoch in range(config.n_epochs):
         print(f"Epoch {epoch + 1}/{config.n_epochs}")
 
-        train_loss, train_acc = train_one_epoch(
-            model, dataloader, optimizer, criterion, device
-        )
-        val_loss, val_acc = (None, None)
+        # --- Train epoch ---
+        if isinstance(scheduler, torch.optim.lr_scheduler.OneCycleLR):
+            # Inline training for OneCycle (batch-level stepping); keep train_one_epoch signature intact
+            model.train()
+            total_loss = 0.0
+            correct = 0
+            total = 0
+
+            for X_batch, y_batch in dataloader:
+                X_batch = X_batch.to(device, non_blocking=True)  # [perf]
+                y_batch = y_batch.to(device, non_blocking=True)  # [perf]
+
+                optimizer.zero_grad()
+                outputs = model(X_batch)
+                loss = criterion(outputs, y_batch)
+                loss.backward()
+                optimizer.step()
+                scheduler.step()  # batch-level
+
+                total_loss += loss.item() * X_batch.size(0)
+                _, predicted = torch.max(outputs, 1)
+                correct += (predicted == y_batch).sum().item()
+                total += y_batch.size(0)
+
+            train_loss = total_loss / total
+            train_acc = correct / total
+        else:
+            # Original path (uses your existing helper)
+            train_loss, train_acc = train_one_epoch(
+                model, dataloader, optimizer, criterion, device
+            )
+
+        print(f"Train Loss: {train_loss:.4f}, Accuracy: {train_acc:.4f}")
+
+        # --- Validate ---
         if val_dataloader:
             val_loss, val_acc = evaluate_on_validation(
                 model, val_dataloader, criterion, device
             )
-
-        print(f"Train Loss: {train_loss:.4f}, Accuracy: {train_acc:.4f}")
-        if val_dataloader:
             print(f"Val   Loss: {val_loss:.4f}, Accuracy: {val_acc:.4f}")
+        else:
+            val_loss, val_acc = train_loss, train_acc
 
         history["train_loss"].append(train_loss)
         history["train_acc"].append(train_acc)
@@ -418,6 +494,17 @@ def run_training(
 
         # Monitor validation loss when available
         monitored = val_loss if val_dataloader else train_loss
+
+        # Step scheduler:
+        # - ReduceLROnPlateau uses monitored metric (val/train loss)
+        # - Cosine steps each epoch (no metric)
+        # - OneCycle was stepped per-batch above
+        if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+            scheduler.step(monitored)
+        elif isinstance(scheduler, torch.optim.lr_scheduler.CosineAnnealingLR):
+            scheduler.step()
+
+        # Save best and reset early-stopping counter
         if config.save_best and monitored < best_loss:
 
             best_loss = monitored
@@ -432,6 +519,19 @@ def run_training(
             torch.save(model.state_dict(), model_path)
             print(f"Saved best model to: {model_path}")
 
+            bad_epochs = 0
+            # cache best weights in memory (so last epoch need not be best)
+            best_state = {k: v.detach().cpu() for k, v in model.state_dict().items()}
+        else:
+            bad_epochs += 1
+            if bad_epochs >= patience:
+                print(f"Early stopping at epoch {epoch + 1}; best loss={best_loss:.4f}")
+                break
+
+    # Restore best weights if cached
+    if best_state is not None:
+        model.load_state_dict(best_state)
+
     # Save history
     if fold_idx is not None:
         HISTORY_DIR.mkdir(parents=True, exist_ok=True)
@@ -440,7 +540,55 @@ def run_training(
             json.dump(history, f, indent=2)
         print(f"Saved training history to: {history_path}")
 
+        # ----------------------------------------------------------------------
+        # Persist classification report CSV for this fold (parallel to history)
+        # ----------------------------------------------------------------------
+        ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
+
+        _m = re.search(r"fold(\d+)", history_path.name)
+        _fold_num = int(_m.group(1)) if _m else (fold_idx + 1)
+
+        if val_dataloader is not None:
+            _y_true, _y_pred = [], []
+            model.eval()
+            with torch.no_grad():
+                for X_batch, y_batch in val_dataloader:
+                    X_batch = X_batch.to(device, non_blocking=True)
+                    y_batch = y_batch.to(device, non_blocking=True)
+                    logits = model(X_batch)
+                    _, predicted = torch.max(logits, 1)
+                    _y_true.extend(y_batch.cpu().numpy().tolist())
+                    _y_pred.extend(predicted.cpu().numpy().tolist())
+
+            _cr = classification_report(
+                _y_true, _y_pred, output_dict=True, zero_division=0
+            )
+            _out_csv = (
+                ARTIFACTS_DIR / f"classification_report_{tag}_fold{_fold_num}.csv"
+            )
+            with _out_csv.open("w", newline="") as _fh:
+                _w = csv.writer(_fh)
+                _w.writerow(["label", "precision", "recall", "f1-score", "support"])
+                for _label, _stats in _cr.items():
+                    if isinstance(_stats, dict):
+                        _w.writerow(
+                            [
+                                _label,
+                                _stats.get("precision"),
+                                _stats.get("recall"),
+                                _stats.get("f1-score"),
+                                _stats.get("support"),
+                            ]
+                        )
+            print(f"Saved classification report to: {_out_csv}")
+        # ----------------------------------------------------------------------
+
     elapsed_min = (time.time() - t0) / 60
+
+    # --- enforce contract in summary: no-fold => val_* is None ---
+    val_loss_summary = None if val_dataloader is None else val_loss
+    val_acc_summary = None if val_dataloader is None else val_acc
+
     summary = {
         "loss": best_loss,
         "elapsed_min": elapsed_min,
@@ -449,9 +597,9 @@ def run_training(
         "model_path": str(model_path) if config.save_best else None,
         "best_epoch": best_epoch,
         "train_losses": train_loss,
-        "val_losses": val_loss,
+        "val_losses": val_loss_summary,
         "train_accs": train_acc,
-        "val_accs": val_acc,
+        "val_accs": val_acc_summary,
     }
 
     return summary

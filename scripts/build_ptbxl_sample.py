@@ -31,9 +31,7 @@ def main(n_records, ptb_dir="data/ptbxl", sample_dir="data/sample"):
 
         # Read 100 Hz version
         rec_path = os.path.join(
-            ptb_dir,
-            "physionet.org", "files", "ptb-xl", "1.0.3",
-            rec
+            ptb_dir, "physionet.org", "files", "ptb-xl", "1.0.3", rec
         )
         record = wfdb.rdrecord(rec_path)
         # record.p_signal: numpy array shape (n_samples, 12)
@@ -43,9 +41,14 @@ def main(n_records, ptb_dir="data/ptbxl", sample_dir="data/sample"):
         pd.DataFrame(record.p_signal).to_csv(out_csv, index=False, header=False)
     print("Sample generation complete.")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--n_records", type=int, default=100,
-                        help="Number of records to include in sample")
+    parser.add_argument(
+        "--n_records",
+        type=int,
+        default=100,
+        help="Number of records to include in sample",
+    )
     args = parser.parse_args()
     main(args.n_records)

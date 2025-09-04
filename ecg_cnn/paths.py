@@ -30,8 +30,9 @@ OUTPUT_DIR = PROJECT_ROOT / "outputs"
 HISTORY_DIR = OUTPUT_DIR / "history"
 PLOTS_DIR = OUTPUT_DIR / "plots"
 MODELS_DIR = OUTPUT_DIR / "models"
+REPORTS_DIR = OUTPUT_DIR / "reports"
 RESULTS_DIR = OUTPUT_DIR / "results"
-CACHE_DIR = OUTPUT_DIR / "cache"
+ARTIFACTS_DIR = OUTPUT_DIR / "artifacts"
 
 # Path to the default training configuration
 DEFAULT_TRAINING_CONFIG = PROJECT_ROOT / "configs" / "baseline.yaml"

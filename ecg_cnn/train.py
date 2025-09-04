@@ -17,28 +17,23 @@ import time
 import torch
 import yaml
 
-from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 
-
-# ------------------------------------------------------------------------------
-# Project Imports (ecg_cnn.* in alphabetical order)
-# ------------------------------------------------------------------------------
 from ecg_cnn.config.config_loader import (
     load_training_config,
     merge_configs,
     load_yaml_as_dict,
 )
-
 from ecg_cnn.models.model_utils import ECGConvNet
 from ecg_cnn.paths import (
     DEFAULT_TRAINING_CONFIG,
     RESULTS_DIR,
 )
-from ecg_cnn.training.cli_args import parse_args, override_config_with_args
+from ecg_cnn.training.cli_args import parse_training_args, override_config_with_args
 from ecg_cnn.training.trainer import run_training
 from ecg_cnn.utils.grid_utils import is_grid_config, expand_grid
+from ecg_cnn.utils.plot_utils import format_hparams
 
 
 # ------------------------------------------------------------------------------
@@ -83,7 +78,7 @@ def _loss_value(s):
 # ------------------------------------------------------------------------------
 def main():
     t0 = time.time()
-    args = parse_args()
+    args = parse_training_args()
 
     # 1. Load baseline/default config
     base_cfg = load_training_config(DEFAULT_TRAINING_CONFIG)
@@ -121,8 +116,12 @@ def main():
     for i, config in enumerate(param_grid):
         print(f"\n===== Starting training run {i+1}/{len(param_grid)} =====")
 
-        tag = f"{config.model}_lr{config.lr:.4g}_bs{config.batch_size}_wd{config.weight_decay:.4g}".replace(
-            ".", ""
+        tag = format_hparams(
+            model=config.model,
+            lr=config.lr,
+            bs=config.batch_size,
+            wd=config.weight_decay,
+            prefix="ecg",  # or "best"/"final" depending on context
         )
         config.tag = tag
 

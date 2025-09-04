@@ -1,12 +1,11 @@
+# utils/grid_utils.py
+
 """
 grid_utils.py
 
 Utility functions for expanding hyperparameter grids and generating configuration
 combinations for multi-run training (grid search). Designed to be called by train.py
 for flexibility and professionalism.
-
-Author: Your Name
-Date: 2025-07-27
 """
 
 import copy
@@ -33,12 +32,6 @@ def is_grid_config(config_dict: Dict[str, Any]) -> bool:
             f"Expected config_dict to be a dict, got {type(config_dict).__name__}"
         )
     return any(isinstance(value, list) for value in config_dict.values())
-
-
-# ecg_cnn/utils/grid_utils.py
-from typing import Dict, Any, Generator
-import itertools
-import copy
 
 
 def expand_grid(config_dict: Dict[str, Any]) -> Generator[Dict[str, Any], None, None]:

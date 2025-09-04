@@ -14,7 +14,12 @@ Covers
     - save_roc_curve(): binary and OvR multiclass save paths
     - save_classification_report(): validation and heatmap save
     - evaluate_and_plot(): end-to-end artifact generation (binary & multiclass),
-      env-override parameters, and error branches
+        env-override parameters, and error branches
+    - shap_sample_background,
+    - shap_compute_values,
+    - shap_save_channel_summary,
+    - save_classification_report_csv,
+    - save_fold_summary_csv,
 
 Notes
 -----
@@ -26,9 +31,12 @@ Notes
 from __future__ import annotations
 
 import io
+
 import numpy as np
 import pandas as pd
 import pytest
+import shap
+import torch
 
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -36,6 +44,9 @@ from sklearn.metrics import brier_score_loss
 
 from ecg_cnn.utils.plot_utils import (
     _build_plot_title,
+    _validate_array_3d,
+    _to_tensor,
+    _to_numpy,
     format_hparams,
     save_plot_curves,
     save_confusion_matrix,
@@ -49,7 +60,18 @@ from ecg_cnn.utils.plot_utils import (
     save_confidence_histogram,
     save_confidence_histogram_split,
     evaluate_and_plot,
+    shap_sample_background,
+    shap_compute_values,
+    shap_save_channel_summary,
+    save_classification_report_csv,
+    save_fold_summary_csv,
 )
+
+# ------------------------------------------------------------------------------
+# Globals
+# ------------------------------------------------------------------------------
+
+shap = pytest.importorskip("shap", reason="SHAP not installed")
 
 # ------------------------------------------------------------------------------
 # helper methods
@@ -61,6 +83,25 @@ def _simple_pred_from_probs(y_probs: np.ndarray) -> np.ndarray:
     if y_probs.ndim == 1:
         return (y_probs >= 0.5).astype(int)
     return np.argmax(y_probs, axis=1)
+
+
+# Tiny 1D model for SHAP tests (kept deliberately simple & fast)
+class _Tiny1D(torch.nn.Module):
+    def __init__(self, in_ch: int, n_class: int):
+        super().__init__()
+        self.net = torch.nn.Sequential(
+            torch.nn.Conv1d(in_ch, 4, kernel_size=5, padding=2),
+            torch.nn.ReLU(),
+            torch.nn.Conv1d(4, 4, kernel_size=3, padding=1),
+            torch.nn.ReLU(),
+            torch.nn.AdaptiveAvgPool1d(1),
+        )
+        self.fc = torch.nn.Linear(4, n_class)
+
+    def forward(self, x):
+        # x: (N, C, T)
+        z = self.net(x).squeeze(-1)  # (N, 4)
+        return self.fc(z)  # (N, n_class)
 
 
 # ------------------------------------------------------------------------------
@@ -2728,3 +2769,865 @@ def test_evaluate_and_plot_binary_with_2d_probs(tmp_path, capsys):
     out = capsys.readouterr().out
     # Sanity check: calibration output was printed (meaning slice branch executed)
     assert "Calibration Curve" in out or "cal_path" in out
+
+
+# ------------------------------------------------------------------------------
+# SHAP stuff
+# ------------------------------------------------------------------------------
+
+
+# ------------------------------------------------------------------------------
+# SHAP helper tests
+# ------------------------------------------------------------------------------
+
+
+class Tiny1D(torch.nn.Module):
+    def __init__(self, in_ch=1, n_class=2):
+        super().__init__()
+        self.conv = torch.nn.Conv1d(in_ch, 4, kernel_size=3, padding=1)
+        self.pool = torch.nn.AdaptiveAvgPool1d(1)
+        self.fc = torch.nn.Linear(4, n_class)
+
+    def forward(self, x):
+        z = torch.relu(self.conv(x))
+        z = self.pool(z).squeeze(-1)
+        return self.fc(z)
+
+
+def _rand(n, c, t):
+    return torch.randn(n, c, t)
+
+
+def test_shap_background_limits_and_validates():
+    X = _rand(50, 2, 128)
+    bg = shap_sample_background(X, max_background=16, seed=22)
+    assert isinstance(bg, torch.Tensor)
+    assert bg.shape == (16, 2, 128)
+    X2 = _rand(8, 1, 64)
+    bg2 = shap_sample_background(X2, max_background=16, seed=22)
+    assert bg2.shape == (8, 1, 64)
+    with pytest.raises(ValueError):
+        shap_sample_background(torch.randn(8, 64), max_background=4)
+    with pytest.raises(ValueError):
+        shap_sample_background(X, max_background=0)
+
+
+def test_shap_compute_values_binary_numpy_shape():
+    m = Tiny1D(in_ch=1, n_class=2).eval()
+    X = _rand(12, 1, 200)
+    bg = shap_sample_background(X, 6, 22)
+    sv = shap_compute_values(m, X, bg)
+    assert isinstance(sv, np.ndarray)
+    assert sv.shape == (12, 1, 200)
+
+
+def test_shap_compute_values_multiclass_list_shapes():
+    m = Tiny1D(in_ch=3, n_class=5).eval()
+    X = _rand(10, 3, 160)
+    bg = shap_sample_background(X, 5, 22)
+    sv_list = shap_compute_values(m, X, bg)
+    assert isinstance(sv_list, list)
+    assert len(sv_list) == 5
+    for sv in sv_list:
+        assert isinstance(sv, np.ndarray)
+        assert sv.shape == (10, 3, 160)
+
+
+def test_shap_save_channel_summary_writes_file(tmp_path: Path):
+    m = Tiny1D(in_ch=2, n_class=2).eval()
+    X = _rand(16, 2, 128)
+    bg = shap_sample_background(X, 8, 22)
+    sv = shap_compute_values(m, X, bg)
+    out = shap_save_channel_summary(sv, X, tmp_path, "shap_summary_test.png")
+    assert out.exists()
+    assert out.name == "shap_summary_test.png"
+
+
+def test_shap_save_channel_summary_validates(tmp_path: Path):
+    with pytest.raises(ValueError):
+        shap_save_channel_summary(
+            np.zeros((8, 2)), np.zeros((8, 2, 64)), tmp_path, "a.png"
+        )
+    with pytest.raises(ValueError):
+        shap_save_channel_summary(
+            np.zeros((8, 2, 64)), np.zeros((8, 2)), tmp_path, "b.png"
+        )
+
+
+# Tiny 1D model for SHAP tests (kept deliberately simple & fast)
+class _Tiny1D(torch.nn.Module):
+    def __init__(self, in_ch: int, n_class: int):
+        super().__init__()
+        self.net = torch.nn.Sequential(
+            torch.nn.Conv1d(in_ch, 4, kernel_size=5, padding=2),
+            torch.nn.ReLU(),
+            torch.nn.Conv1d(4, 4, kernel_size=3, padding=1),
+            torch.nn.ReLU(),
+            torch.nn.AdaptiveAvgPool1d(1),
+        )
+        self.fc = torch.nn.Linear(4, n_class)
+
+    def forward(self, x):
+        # x: (N, C, T)
+        z = self.net(x).squeeze(-1)  # (N, 4)
+        return self.fc(z)  # (N, n_class)
+
+
+# ------------------------------------------------------------------------------
+# _validate_array_3d()
+# ------------------------------------------------------------------------------
+
+
+def test_validate_array_3d_happy_path():
+    x = np.zeros((2, 3, 5), dtype=float)
+    n, c, t = _validate_array_3d("x", x)
+    assert (n, c, t) == (2, 3, 5)
+
+
+def test_validate_array_3d_wrong_type():
+    with pytest.raises(TypeError):
+        _validate_array_3d("x", 123)  # not ndarray/tensor
+
+
+def test_validate_array_3d_wrong_ndim():
+    with pytest.raises(ValueError):
+        _validate_array_3d("x", np.zeros((2, 3)))  # 2D, not 3D
+
+
+def test_validate_array_3d_nonpositive_dim():
+    with pytest.raises(ValueError):
+        _validate_array_3d("x", np.zeros((1, 0, 4)))
+
+
+# ------------------------------------------------------------------------------
+# _to_tensor()
+# ------------------------------------------------------------------------------
+
+
+def test_to_tensor_from_numpy_and_passthrough():
+    x_np = np.random.randn(4, 2, 10).astype(np.float32)
+    t1 = _to_tensor(x_np, "x")
+    assert isinstance(t1, torch.Tensor)
+    x_t = torch.randn(3, 1, 8)
+    t2 = _to_tensor(x_t, "x")
+    assert t2 is x_t  # passthrough
+
+
+def test_to_tensor_type_error():
+    with pytest.raises(TypeError):
+        _to_tensor("bad", "x")
+
+
+# ------------------------------------------------------------------------------
+# _to_numpy()
+# ------------------------------------------------------------------------------
+
+
+def test_to_numpy_from_tensor_and_passthrough():
+    x_t = torch.randn(5, 2, 7)
+    a1 = _to_numpy(x_t, "x")
+    assert isinstance(a1, np.ndarray)
+    x_np = np.zeros((2, 2, 2), dtype=float)
+    a2 = _to_numpy(x_np, "x")
+    assert a2 is x_np  # passthrough
+
+
+def test_to_numpy_type_error():
+    with pytest.raises(TypeError):
+        _to_numpy(object(), "x")
+
+
+# ------------------------------------------------------------------------------
+# shap_sample_background()
+# ------------------------------------------------------------------------------
+
+
+def test_shap_sample_background_no_subsample():
+    X = np.random.randn(16, 2, 64).astype(np.float32)
+    bg = shap_sample_background(X, max_background=32, seed=22)
+    # n <= max_background => identity
+    assert bg.shape == (16, 2, 64)
+    assert np.allclose(bg.numpy(), X)
+
+
+def test_shap_sample_background_subsample_deterministic():
+    X = np.random.randn(64, 2, 64).astype(np.float32)
+    bg1 = shap_sample_background(X, max_background=16, seed=22)
+    bg2 = shap_sample_background(X, max_background=16, seed=22)
+    assert bg1.shape == (16, 2, 64)
+    assert np.allclose(bg1.numpy(), bg2.numpy())
+    # Different seed likely different sample
+    bg3 = shap_sample_background(X, max_background=16, seed=23)
+    assert not np.allclose(bg1.numpy(), bg3.numpy())
+
+
+# ------------------------------------------------------------------------------
+# shap_compute_values()
+# ------------------------------------------------------------------------------
+
+
+def test_shap_compute_values_restores_training_mode_and_binary_shape():
+    model = _Tiny1D(in_ch=1, n_class=2)
+    model.train()  # ensure we start in train mode
+    X = np.random.randn(12, 1, 128).astype(np.float32)
+    bg = shap_sample_background(X, max_background=6, seed=22)
+
+    sv = shap_compute_values(model, X, bg)  # check_additivity=False inside
+    # After call, original training mode restored
+    assert model.training is True
+    # Binary returns single array (N, C, T)
+    assert isinstance(sv, np.ndarray)
+    assert sv.shape == (12, 1, 128)
+
+
+def test_shap_compute_values_multiclass_shapes_list():
+    model = _Tiny1D(in_ch=3, n_class=5).eval()
+    X = np.random.randn(10, 3, 96).astype(np.float32)
+    bg = shap_sample_background(X, max_background=5, seed=22)
+
+    sv_list = shap_compute_values(model, X, bg)
+    assert isinstance(sv_list, list) and len(sv_list) == 5
+    for sv in sv_list:
+        assert isinstance(sv, np.ndarray)
+        assert sv.shape == (10, 3, 96)
+
+
+# ------------------------------------------------------------------------------
+# shap_save_channel_summary()
+# ------------------------------------------------------------------------------
+
+
+def test_shap_save_channel_summary_raises_on_empty_list(tmp_path: Path):
+    X = np.random.randn(4, 2, 16).astype(np.float32)
+    with pytest.raises(ValueError):
+        shap_save_channel_summary([], X, tmp_path, "empty.png")
+
+
+def test_shap_save_channel_summary_validates_shape(tmp_path: Path):
+    # C == 0 triggers validation error
+    sv = np.zeros((5, 0, 10), dtype=np.float32)
+    X = np.zeros((5, 0, 10), dtype=np.float32)
+    with pytest.raises(ValueError):
+        shap_save_channel_summary(sv, X, tmp_path, "bad.png")
+
+
+def test_shap_save_channel_summary_writes_file_binary(tmp_path: Path):
+    # Simple binary shap: (N, C, T)
+    sv = np.random.randn(8, 2, 20).astype(np.float32)
+    X = np.random.randn(8, 2, 20).astype(np.float32)
+    out = shap_save_channel_summary(sv, X, tmp_path, "chan_imp.png")
+    assert out.exists() and out.suffix == ".png" and out.stat().st_size > 0
+
+
+def test_shap_save_channel_summary_multiclass_picks_max(tmp_path: Path):
+    # Two classes; class 1 has larger magnitude
+    sv0 = np.random.randn(6, 3, 12).astype(np.float32) * 0.01
+    sv1 = np.random.randn(6, 3, 12).astype(np.float32) * 1.50
+    X = np.random.randn(6, 3, 12).astype(np.float32)
+    out = shap_save_channel_summary([sv0, sv1], X, tmp_path, "mc_imp.png")
+    assert out.exists() and out.stat().st_size > 0
+
+
+# ------------------------------------------------------------------------------
+# shap_compute_values()
+# ------------------------------------------------------------------------------
+
+
+def test_shap_compute_values_multiclass_branch_via_stub(monkeypatch):
+    class DummyExplainer:
+        def __init__(self, model, bg):
+            pass
+
+        def shap_values(self, X, check_additivity=False):
+            # Force "list" branch: return K=3 class maps (N,C,T)
+            n, c, t = X.shape
+            return [np.zeros((n, c, t), dtype=np.float32) + k for k in range(3)]
+
+    monkeypatch.setattr(shap, "DeepExplainer", lambda m, bg: DummyExplainer(m, bg))
+
+    # Param-less model that outputs logits (N, K)
+    class TinyLogits(torch.nn.Module):
+        def forward(self, x):
+            # x: (N, C, T) -> logits: (N, 3)
+            # Use simple reductions to avoid parameters
+            # (any (N,K) is fine for the shape check)
+            m = x.mean(dim=2)  # (N, C)
+            if m.shape[1] == 1:  # expand to 3 "classes"
+                m = m.repeat(1, 3)  # (N, 3)
+            else:
+                m = m[:, :3]  # (N, 3)
+            return m
+
+    model = TinyLogits().eval()
+
+    X = np.random.randn(2, 1, 8).astype(np.float32)
+    bg = X[:1]
+
+    out = shap_compute_values(model, X, bg, device=torch.device("cpu"))
+
+    assert isinstance(out, list) and len(out) == 3
+    for k, sv in enumerate(out):
+        assert sv.shape == (2, 1, 8)
+
+
+def test_shap_compute_values_raises_when_model_has_no_params_and_no_device():
+    """Covers plot_utils.py:2837 — model has no parameters and device=None -> ValueError."""
+
+    class _NoParamModel(torch.nn.Module):
+        def forward(self, x):
+            # Won’t be reached; the error is raised before any forward pass.
+            return torch.zeros(1)
+
+    # Valid (N, C, T) arrays to get past shape checks quickly
+    X = np.zeros((1, 1, 8), dtype=np.float32)
+    bg = np.zeros((1, 1, 8), dtype=np.float32)
+
+    with pytest.raises(ValueError) as ei:
+        shap_compute_values(_NoParamModel(), X, bg, device=None)
+
+    msg = str(ei.value)
+    assert "model has no parameters" in msg
+    assert "cannot infer device" in msg
+
+
+def test_shap_compute_values_invalid_logits_shape_raises():
+    """Covers plot_utils.py: invalid model output shape triggers ValueError."""
+
+    class _BadShapeModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.w = torch.nn.Parameter(torch.zeros(1))  # ensure params exist
+
+        def forward(self, x):
+            # Invalid: 2D but first dim != 1, and not 1D either
+            return torch.zeros((5, 3))
+
+    X = np.zeros((2, 1, 4), dtype=np.float32)
+    bg = np.zeros((1, 1, 4), dtype=np.float32)
+
+    with pytest.raises(ValueError) as ei:
+        shap_compute_values(_BadShapeModel(), X, bg, device=torch.device("cpu"))
+    assert "Expected model logits" in str(ei.value)
+
+
+def test_shap_compute_values_binary_path_returns_array(monkeypatch):
+    """Covers plot_utils.py:single SHAP map is returned directly."""
+
+    class _TinyModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.fc = torch.nn.Linear(4, 1)  # at least one parameter
+
+        def forward(self, x):
+            return torch.zeros(1)  # valid: 1D logits
+
+    # Fake SHAP: DeepExplainer returns a single (N,C,T) ndarray
+    fake_out = np.ones((1, 1, 4), dtype=np.float32)
+
+    class _FakeExplainer:
+        def __init__(self, model, bg):
+            pass
+
+        def shap_values(self, X, **kw):
+            return fake_out
+
+    # Patch the *correct* module path (your file is ecg_cnn/utils/plot_utils.py)
+    monkeypatch.setattr(
+        "ecg_cnn.utils.plot_utils.shap.DeepExplainer",
+        lambda m, b: _FakeExplainer(m, b),
+        raising=True,
+    )
+
+    X = np.zeros((1, 1, 4), dtype=np.float32)
+    bg = np.zeros((1, 1, 4), dtype=np.float32)
+    out = shap_compute_values(_TinyModel(), X, bg, device=torch.device("cpu"))
+
+    assert isinstance(out, np.ndarray)
+    assert out.shape == (1, 1, 4)
+    assert (out == 1).all()
+
+
+def test_shap_compute_values_falls_back_to_gradient_on_tf_import(monkeypatch):
+    """Covers plot_utils.py: DeepExplainer raises TF import error; fallback uses GradientExplainer."""
+
+    class _TinyModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.fc = torch.nn.Linear(4, 1)  # ensure parameters exist
+
+        def forward(self, x):
+            return torch.zeros(1)  # valid 1D logits
+
+    # Simulate DeepExplainer failing due to TensorFlow import
+    class _DeepFail:
+        def __init__(self, model, bg):
+            raise ImportError("No module named 'tensorflow'")
+
+    # GradientExplainer succeeds and returns a single (N,C,T) map
+    fake_out = np.full((1, 1, 4), 7, dtype=np.float32)
+
+    class _GradOK:
+        def __init__(self, model, bg):
+            pass
+
+        def shap_values(self, X):
+            return fake_out
+
+    monkeypatch.setattr(
+        "ecg_cnn.utils.plot_utils.shap.DeepExplainer", _DeepFail, raising=True
+    )
+    monkeypatch.setattr(
+        "ecg_cnn.utils.plot_utils.shap.GradientExplainer", _GradOK, raising=True
+    )
+
+    X = np.zeros((1, 1, 4), dtype=np.float32)
+    bg = np.zeros((1, 1, 4), dtype=np.float32)
+    out = shap_compute_values(_TinyModel(), X, bg, device=torch.device("cpu"))
+
+    # Single-map normalization path -> returns array directly
+    assert isinstance(out, np.ndarray)
+    assert out.shape == (1, 1, 4)
+    assert (out == 7).all()
+
+
+def test_shap_compute_values_tf_import_then_gradient_fails_raises_runtime(monkeypatch):
+    """Covers plot_utils.py: DeepExplainer TF error; GradientExplainer also fails => RuntimeError."""
+
+    class _TinyModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.fc = torch.nn.Linear(4, 1)
+
+        def forward(self, x):
+            return torch.zeros(1)
+
+    class _DeepFail:
+        def __init__(self, model, bg):
+            raise ImportError("No module named 'tensorflow'")
+
+    class _GradFail:
+        def __init__(self, model, bg):
+            pass
+
+        def shap_values(self, X):
+            raise RuntimeError("gradient boom")
+
+    monkeypatch.setattr(
+        "ecg_cnn.utils.plot_utils.shap.DeepExplainer", _DeepFail, raising=True
+    )
+    monkeypatch.setattr(
+        "ecg_cnn.utils.plot_utils.shap.GradientExplainer", _GradFail, raising=True
+    )
+
+    X = np.zeros((1, 1, 4), dtype=np.float32)
+    bg = np.zeros((1, 1, 4), dtype=np.float32)
+    with pytest.raises(RuntimeError) as ei:
+        shap_compute_values(_TinyModel(), X, bg, device=torch.device("cpu"))
+    msg = str(ei.value)
+    assert "SHAP DeepExplainer failed:" in msg
+    assert "tensorflow" in msg.lower()
+
+
+def test_shap_compute_values_deep_fails_non_tf_raises_runtime(monkeypatch):
+    """Covers plot_utils.py: DeepExplainer raises non-TF error => RuntimeError."""
+
+    class _TinyModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.fc = torch.nn.Linear(4, 1)
+
+        def forward(self, x):
+            return torch.zeros(1)
+
+    class _DeepFail:
+        def __init__(self, model, bg):
+            # Not a TF import message; should go straight to RuntimeError
+            raise ValueError("weird failure in deep explainer")
+
+    monkeypatch.setattr(
+        "ecg_cnn.utils.plot_utils.shap.DeepExplainer", _DeepFail, raising=True
+    )
+
+    X = np.zeros((1, 1, 4), dtype=np.float32)
+    bg = np.zeros((1, 1, 4), dtype=np.float32)
+    with pytest.raises(RuntimeError) as ei:
+        shap_compute_values(_TinyModel(), X, bg, device=torch.device("cpu"))
+    assert "SHAP DeepExplainer failed:" in str(ei.value)
+
+
+# ------------------------------------------------------------------------------
+# save_classification_report_csv()
+# ------------------------------------------------------------------------------
+
+
+def test_save_classification_report_csv_raises_on_non_positive_fold_id(tmp_path):
+    # Minimal valid y arrays
+    y_true = [0, 1]
+    y_pred = [0, 1]
+    with pytest.raises(ValueError) as ei:
+        save_classification_report_csv(y_true, y_pred, tmp_path, "t", 0)
+    assert "fold_id must be a positive integer" in str(ei.value)
+
+
+def test_save_cr_raises_on_empty_or_mismatch_vectors(tmp_path):
+    # Empty
+    with pytest.raises(ValueError) as ei1:
+        save_classification_report_csv([], [], tmp_path, "t", 1)
+    assert "y_true and y_pred must be same non-zero length" in str(ei1.value)
+
+    # Mismatch
+    with pytest.raises(ValueError) as ei2:
+        save_classification_report_csv([0, 1], [0], tmp_path, "t", 1)
+    assert "y_true and y_pred must be same non-zero length" in str(ei2.value)
+
+
+# ------------------------------------------------------------------------------
+# save_fold_summary_csv()
+# ------------------------------------------------------------------------------
+
+
+def test_save_fold_summary_csv_invalid_tag_prints_and_returns_none(tmp_path, capsys):
+
+    out = save_fold_summary_csv(tmp_path / "reports", "")  # invalid tag
+    printed = capsys.readouterr().out
+    assert out is None
+    assert "save_fold_summary_csv: invalid tag provided" in printed
+
+
+def test_save_fold_summary_csv_requires_two_folds(tmp_path, capsys):
+    # Layout expected by save_fold_summary_csv:
+    # reports_dir parent has history/ and artifacts/ siblings
+    root = tmp_path / "outputs"
+    reports = root / "reports"
+    history = root / "history"
+    artifacts = root / "artifacts"
+    for p in (reports, history, artifacts):
+        p.mkdir(parents=True, exist_ok=True)
+
+    tag = "ecg_ECGResNet_lr001_bs8_wd0"
+
+    # Only ONE history file -> should print and return None
+    (history / f"history_{tag}_fold1.json").write_text(
+        '{"best_epoch": 0, "val_acc": [0.8], "val_loss": [0.3]}'
+    )
+
+    out = save_fold_summary_csv(reports, tag)
+    printed = capsys.readouterr().out
+
+    assert out is None
+    assert f"save_fold_summary_csv: found only 1 folds for tag '{tag}'" in printed
+
+
+def test_save_fold_summary_csv_aggregates_and_writes(tmp_path, capsys):
+
+    # Directory layout
+    root = tmp_path / "outputs"
+    reports = root / "reports"
+    history = root / "history"
+    artifacts = root / "artifacts"
+    for p in (reports, history, artifacts):
+        p.mkdir(parents=True, exist_ok=True)
+
+    tag = "ecg_ECGResNet_lr001_bs8_wd0"
+
+    # Two folds' history files (with explicit best_epoch)
+    (history / f"history_{tag}_fold1.json").write_text(
+        '{"best_epoch": 1, "val_acc": [0.7, 0.8], "val_loss": [0.4, 0.3]}'
+    )
+    (history / f"history_{tag}_fold2.json").write_text(
+        '{"best_epoch": 0, "val_acc": [0.9], "val_loss": [0.2]}'
+    )
+
+    # Matching per-fold classification report CSVs under artifacts/
+    # Header must include at least label and f1-score; include a macro avg row
+    (artifacts / f"classification_report_{tag}_fold1.csv").write_text(
+        "label,precision,recall,f1-score,support\n"
+        "CD,0,0,0,0\n"
+        "macro avg,0.5,0.5,0.55,2\n"
+    )
+    (artifacts / f"classification_report_{tag}_fold2.csv").write_text(
+        "label,precision,recall,f1-score,support\n"
+        "CD,0,0,0,0\n"
+        "macro avg,0.5,0.5,0.65,2\n"
+    )
+
+    out_csv = save_fold_summary_csv(reports, tag)
+    printed = capsys.readouterr().out
+
+    # It should succeed and print the path
+    assert out_csv is not None
+    assert out_csv.exists()
+    assert f"Saved fold summary CSV to {out_csv}" in printed
+
+    # Validate a few key rows/values were written
+    content = out_csv.read_text().strip().splitlines()
+
+    # Fold rows are written before the blank line; find them explicitly
+    row1 = next(r for r in content if r.startswith("1,"))
+    row2 = next(r for r in content if r.startswith("2,"))
+
+    c1 = row1.split(",")
+    c2 = row2.split(",")
+
+    # CSV schema from implementation:
+    # ["fold","best_epoch","val_acc","val_loss","macro_f1","history_path","cr_csv"]
+    assert len(c1) >= 7 and len(c2) >= 7
+
+    # Fold 1 expectations
+    assert c1[0] == "1"
+    assert c1[2] == "0.8"  # val_acc at best_epoch=1
+    assert c1[4] == "0.55"  # macro_f1 from CR CSV
+
+    # Fold 2 expectations
+    assert c2[0] == "2"
+    assert c2[2] == "0.9"  # val_acc at best_epoch=0
+    assert c2[4] == "0.65"  # macro_f1 from CR CSV
+
+    # Check mean lines are present (exact values depend on computation)
+    assert any(line.startswith("mean_val_acc,") for line in content)
+    assert any(line.startswith("std_val_acc,") for line in content)
+    assert any(line.startswith("mean_macro_f1,") for line in content)
+    assert any(line.startswith("std_macro_f1,") for line in content)
+
+
+def test_save_fold_summary_csv_handles_bad_history_json(tmp_path, capsys):
+    reports = tmp_path / "reports"
+    history = reports.parent / "history"
+    artifacts = reports.parent / "artifacts"
+    for d in (reports, history, artifacts):
+        d.mkdir(parents=True, exist_ok=True)
+
+    tag = "ecg_ECGResNet_lr001_bs8_wd0"
+
+    # One unreadable + one valid so we pass the "<2 folds" check
+    (history / f"history_{tag}_fold1.json").write_text("{not json")
+    (history / f"history_{tag}_fold2.json").write_text(
+        '{"best_epoch":0,"val_acc":[0.9],"val_loss":[0.2]}'
+    )
+
+    out = save_fold_summary_csv(reports, tag)
+    printed = capsys.readouterr().out
+
+    assert out is not None or out is None  # We only care about the error message
+    assert "save_fold_summary_csv: failed to read" in printed
+
+
+def test_save_fold_summary_csv_handles_val_loss_non_numeric(tmp_path, capsys):
+    reports = tmp_path / "reports"
+    history = reports.parent / "history"
+    artifacts = reports.parent / "artifacts"
+    for d in (reports, history, artifacts):
+        d.mkdir(parents=True, exist_ok=True)
+
+    tag = "ecg_ECGResNet_lr001_bs8_wd0"
+
+    # Unorderable val_loss so min(..., key=...) throws -> caught -> be=None
+    (history / f"history_{tag}_fold1.json").write_text(
+        '{"val_loss": [{"a":1},{"b":2}], "val_acc": []}'
+    )
+    # A second valid fold so we don't trip the "<2 folds" early exit
+    (history / f"history_{tag}_fold2.json").write_text(
+        '{"best_epoch": 0, "val_acc": [0.9], "val_loss": [0.1]}'
+    )
+
+    out = save_fold_summary_csv(reports, tag)
+    printed = capsys.readouterr().out
+
+    assert out is not None  # aggregation still succeeds thanks to fold2
+    assert "failed to resolve best_epoch" in printed
+
+
+def test_save_fold_summary_csv_handles_bad_macro_f1_value(tmp_path, capsys):
+    reports = tmp_path / "reports"
+    history = reports.parent / "history"
+    artifacts = reports.parent / "artifacts"
+    for d in (reports, history, artifacts):
+        d.mkdir(parents=True, exist_ok=True)
+
+    tag = "ecg_ECGResNet_lr001_bs8_wd0"
+    (history / f"history_{tag}_fold1.json").write_text(
+        '{"best_epoch": 0, "val_acc": [0.5], "val_loss": [0.5]}'
+    )
+    (history / f"history_{tag}_fold2.json").write_text(
+        '{"best_epoch": 0, "val_acc": [0.6], "val_loss": [0.4]}'
+    )
+    # Corrupt CSV with non-numeric macro avg f1
+    (artifacts / f"classification_report_{tag}_fold1.csv").write_text(
+        "label,f1-score\nmacro avg,not_a_number\n"
+    )
+    (artifacts / f"classification_report_{tag}_fold2.csv").write_text(
+        "label,f1-score\nmacro avg,0.9\n"
+    )
+
+    save_fold_summary_csv(reports, tag)
+    printed = capsys.readouterr().out
+    assert "bad macro_f1 value" in printed
+
+
+def test_save_fold_summary_csv_handles_failed_csv_parse(tmp_path, capsys):
+    reports = tmp_path / "reports"
+    history = reports.parent / "history"
+    artifacts = reports.parent / "artifacts"
+    for d in (reports, history, artifacts):
+        d.mkdir(parents=True, exist_ok=True)
+
+    tag = "ecg_ECGResNet_lr001_bs8_wd0"
+    (history / f"history_{tag}_fold1.json").write_text(
+        '{"best_epoch":0,"val_acc":[0.5],"val_loss":[0.5]}'
+    )
+    (history / f"history_{tag}_fold2.json").write_text(
+        '{"best_epoch":0,"val_acc":[0.6],"val_loss":[0.4]}'
+    )
+
+    # Make CR path a directory -> .open(...) fails -> triggers "failed to parse"
+    (artifacts / f"classification_report_{tag}_fold1.csv").mkdir(
+        parents=True, exist_ok=True
+    )
+
+    out = save_fold_summary_csv(reports, tag)
+    printed = capsys.readouterr().out
+
+    assert out is not None  # still writes the summary
+    assert "failed to parse" in printed
+
+
+def test_save_fold_summary_csv_mean_std_empty_lists(tmp_path):
+    reports = tmp_path / "reports"
+    history = reports.parent / "history"
+    artifacts = reports.parent / "artifacts"
+    for d in (reports, history, artifacts):
+        d.mkdir(parents=True, exist_ok=True)
+
+    tag = "ecg_ECGResNet_lr001_bs8_wd0"
+    # Two folds but with empty metrics
+    (history / f"history_{tag}_fold1.json").write_text("{}")
+    (history / f"history_{tag}_fold2.json").write_text("{}")
+
+    out = save_fold_summary_csv(reports, tag)
+    assert (
+        out is None or out.exists()
+    )  # safe: mean/std branches just return (None, None)
+
+
+def test_save_fold_summary_csv_handles_write_failure(tmp_path, capsys):
+    reports = tmp_path / "reports"
+    history = reports.parent / "history"
+    artifacts = reports.parent / "artifacts"
+    for d in (reports, history, artifacts):
+        d.mkdir(parents=True, exist_ok=True)
+
+    tag = "ecg_ECGResNet_lr001_bs8_wd0"
+    (history / f"history_{tag}_fold1.json").write_text(
+        '{"best_epoch":0,"val_acc":[0.5],"val_loss":[0.5]}'
+    )
+    (history / f"history_{tag}_fold2.json").write_text(
+        '{"best_epoch":0,"val_acc":[0.6],"val_loss":[0.4]}'
+    )
+
+    # Pre-create a DIRECTORY where the function will try to write the CSV
+    bad_target = reports / f"fold_summary_{tag}.csv"
+    bad_target.mkdir(parents=True, exist_ok=True)
+
+    out = save_fold_summary_csv(reports, tag)
+    printed = capsys.readouterr().out
+
+    assert out is None
+    assert "failed to write" in printed
+
+
+def test_save_fold_summary_csv_header_missing_label_uses_col0_for_label(tmp_path):
+    # Layout
+    reports = tmp_path / "reports"
+    history = reports.parent / "history"
+    artifacts = reports.parent / "artifacts"
+    for d in (reports, history, artifacts):
+        d.mkdir(parents=True, exist_ok=True)
+    tag = "ecg_ECGResNet_lr001_bs8_wd0"
+
+    # Two folds so we pass the "<2 folds" guard
+    (history / f"history_{tag}_fold1.json").write_text(
+        '{"best_epoch":0,"val_acc":[0.8],"val_loss":[0.3]}'
+    )
+    (history / f"history_{tag}_fold2.json").write_text(
+        '{"best_epoch":0,"val_acc":[0.9],"val_loss":[0.2]}'
+    )
+
+    # CSV header *without* "label" → _col("label") returns None,
+    # code falls back to label_i = 0. Put "macro avg" in col 0.
+    (artifacts / f"classification_report_{tag}_fold1.csv").write_text(
+        "L,precision,recall,f1-score,support\n"
+        "CD,0,0,0,0\n"
+        "macro avg,0.1,0.1,0.55,2\n"
+    )
+    # Second fold can be minimal/ignored by macro-f1 assertion
+    (artifacts / f"classification_report_{tag}_fold2.csv").write_text(
+        "label,precision,recall,f1-score,support\n" "macro avg,0.1,0.1,0.65,2\n"
+    )
+
+    out_csv = save_fold_summary_csv(reports, tag)
+    content = out_csv.read_text().splitlines()
+    row1 = next(r for r in content if r.startswith("1,"))
+    # macro_f1 is column 5 (index 4)
+    assert row1.split(",")[4] == "0.55"
+
+
+def test_save_fold_summary_csv_header_missing_f1score_uses_index3(tmp_path):
+    reports = tmp_path / "reports"
+    history = reports.parent / "history"
+    artifacts = reports.parent / "artifacts"
+    for d in (reports, history, artifacts):
+        d.mkdir(parents=True, exist_ok=True)
+    tag = "ecg_ECGResNet_lr001_bs8_wd0"
+
+    (history / f"history_{tag}_fold1.json").write_text(
+        '{"best_epoch":0,"val_acc":[0.8],"val_loss":[0.3]}'
+    )
+    (history / f"history_{tag}_fold2.json").write_text(
+        '{"best_epoch":0,"val_acc":[0.9],"val_loss":[0.2]}'
+    )
+
+    # Header has at least 4 columns but *no* "f1-score".
+    # The code sets f1_i = 3, so put macro f1 value at column index 3.
+    (artifacts / f"classification_report_{tag}_fold1.csv").write_text(
+        "label,precision,recall,f1,S\n" "CD,0,0,0,0\n" "macro avg,0.1,0.1,0.77,2\n"
+    )
+    (artifacts / f"classification_report_{tag}_fold2.csv").write_text(
+        "label,precision,recall,f1,S\n" "macro avg,0.1,0.1,0.22,2\n"
+    )
+
+    out_csv = save_fold_summary_csv(reports, tag)
+    content = out_csv.read_text().splitlines()
+    row1 = next(r for r in content if r.startswith("1,"))
+    assert row1.split(",")[4] == "0.77"  # macro_f1 extracted via fallback f1_i=3
+
+
+def test_save_fold_summary_csv_skips_too_short_rows_then_reads_macro(tmp_path):
+    reports = tmp_path / "reports"
+    history = reports.parent / "history"
+    artifacts = reports.parent / "artifacts"
+    for d in (reports, history, artifacts):
+        d.mkdir(parents=True, exist_ok=True)
+    tag = "ecg_ECGResNet_lr001_bs8_wd0"
+
+    (history / f"history_{tag}_fold1.json").write_text(
+        '{"best_epoch":0,"val_acc":[0.8],"val_loss":[0.3]}'
+    )
+    (history / f"history_{tag}_fold2.json").write_text(
+        '{"best_epoch":0,"val_acc":[0.9],"val_loss":[0.2]}'
+    )
+
+    # First data row is too short (len(row) <= max(label_i,f1_i)) triggers 'continue'.
+    # Second row is valid macro avg and will be parsed.
+    (artifacts / f"classification_report_{tag}_fold1.csv").write_text(
+        "label,precision,recall,f1-score\n"
+        "macro avg,0.5\n"  # too short -> skipped
+        "macro avg,0.1,0.1,0.42\n"  # valid -> used
+    )
+    (artifacts / f"classification_report_{tag}_fold2.csv").write_text(
+        "label,precision,recall,f1-score\n" "macro avg,0.1,0.1,0.11\n"
+    )
+
+    out_csv = save_fold_summary_csv(reports, tag)
+    content = out_csv.read_text().splitlines()
+    row1 = next(r for r in content if r.startswith("1,"))
+    assert row1.split(",")[4] == "0.42"  # ensured the short row was skipped

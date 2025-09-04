@@ -1,4 +1,7 @@
 #!/usr/bin/env python
+
+# evaluate.py
+
 """
 Unified evaluator for trained ECG CNN runs.
 
@@ -24,33 +27,51 @@ CLI
 python -m ecg_cnn.evaluate              # evaluate latest config's tag, best
                                         # fold by loss
 python -m ecg_cnn.evaluate --fold 3     # force a specific fold
+python -m ecg_cnn.evaluate --enable_ovr # produces OvR plots for 5 classes
+
+# SHAP controls:
+python -m ecg_cnn.evaluate --shap fast
+python -m ecg_cnn.evaluate --shap medium
+python -m ecg_cnn.evaluate --shap thorough
+python -m ecg_cnn.evaluate --shap off
+python -m ecg_cnn.evaluate --shap custom --shap-n 12 --shap-bg 12 --shap-stride 3
 """
 
 import argparse
 import json
 import numpy as np
 import os
+import re
 import sys
 import time
 import torch
 import torch.nn as nn
 from pathlib import Path
-from sklearn.metrics import classification_report
 from sklearn.preprocessing import LabelEncoder
 from torch.utils.data import TensorDataset, DataLoader
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from ecg_cnn.config.config_loader import load_training_config, TrainConfig
 from ecg_cnn.data.data_utils import load_ptbxl_full, FIVE_SUPERCLASSES
 from ecg_cnn.models import MODEL_CLASSES
 from ecg_cnn.paths import (
+    ARTIFACTS_DIR,
     HISTORY_DIR,
-    RESULTS_DIR,
+    MODELS_DIR,
     OUTPUT_DIR,
+    PLOTS_DIR,
+    REPORTS_DIR,
     PTBXL_DATA_DIR,
+    RESULTS_DIR,
 )
+from ecg_cnn.training.cli_args import parse_evaluate_args
 from ecg_cnn.utils.plot_utils import (
     evaluate_and_plot,
+    shap_sample_background,
+    shap_compute_values,
+    shap_save_channel_summary,
+    save_classification_report_csv,
+    save_fold_summary_csv,
 )
 
 # ------------------------------------------------------------------------------
@@ -61,6 +82,15 @@ torch.manual_seed(SEED)
 np.random.seed(SEED)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
+
+ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
+HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+MODELS_DIR.mkdir(parents=True, exist_ok=True)
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+PLOTS_DIR.mkdir(parents=True, exist_ok=True)
+PTBXL_DATA_DIR.mkdir(parents=True, exist_ok=True)
+REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ------------------------------------------------------------------------------
@@ -96,7 +126,6 @@ def _load_config_and_extras(
 
     extras: Dict[str, Any] = {}
     for key in ("fold", "tag", "config"):
-        print(f"^^^^^key = {key}")
         if key == "fold" and fold_override is not None:
             extras[key] = fold_override
         else:
@@ -128,7 +157,6 @@ def _read_summary(tag: str) -> List[dict]:
         FileNotFoundError: if the summary file does not exist.
         ValueError: if the file is empty or malformed.
     """
-    # summary_path = OUTPUT_DIR / "results" / f"summary_{tag}.json"
     summary_path = RESULTS_DIR / f"summary_{tag}.json"
     if not summary_path.exists():
         raise FileNotFoundError(
@@ -285,8 +313,6 @@ def _resolve_ovr_flags(
             sys.exit(1)
         env_list = [c.strip() for c in env_classes.split(",")]  # if env_classes else []
         env_list = _validate_strict(env_list, "environment")
-        # reached only if non-empty AND all valid
-        # if env_list:
         ovr_classes = env_list
         enable_ovr = True
 
@@ -320,12 +346,131 @@ def _resolve_ovr_flags(
 
 
 # ------------------------------------------------------------------------------
-# Main
+# SHAP stability/uncertainty report (validated; no imports inside functions)
+# ------------------------------------------------------------------------------
+
+
+def _np_from_tensor(x, name: str) -> np.ndarray:
+    if isinstance(x, torch.Tensor):
+        return x.detach().cpu().numpy()
+    if isinstance(x, np.ndarray):
+        return x
+    raise TypeError(f"{name} must be np.ndarray or torch.Tensor, got {type(x)}")
+
+
+def _validate_3d(name: str, arr: np.ndarray) -> None:
+    if not isinstance(arr, np.ndarray):
+        raise TypeError(f"{name} must be np.ndarray after conversion")
+    if arr.ndim != 3:
+        raise ValueError(
+            f"{name} must have shape (N, C, T); got ndim={arr.ndim} and shape={arr.shape}"
+        )
+    N, C, T = arr.shape
+    if N <= 0 or C <= 0 or T <= 1:
+        raise ValueError(f"{name} invalid shape {arr.shape}; need N>0, C>0, T>1")
+
+
+def _shap_stability_report(sv, *, class_names: Optional[Sequence[str]] = None) -> str:
+    """
+    Make a numeric stability report for SHAP channel importances.
+
+    Parameters
+    ----------
+    sv : list of (N, C, T) arrays OR a single (N, C, T) array
+         - Multiclass: list length=K, each (N, C, T)
+         - Binary:     single (N, C, T)
+         Elements may be numpy arrays or torch tensors.
+
+    class_names : optional list of class labels; unused in math, only for context.
+
+    Returns
+    -------
+    str
+        A small ranked table with mean±SEM per channel and a stability flag:
+          STABLE (CV < 0.25), OK (0.25-0.50), NOISY (>= 0.50)
+
+    Raises
+    ------
+    TypeError / ValueError
+        If `sv` is the wrong type or has inconsistent/invalid shapes.
+    """
+    # Normalize to a single ndarray of shape (N, C, T) with |SHAP| averaged across classes
+    if isinstance(sv, list):
+        if len(sv) == 0:
+            raise ValueError("sv is an empty list.")
+        sv_np = []
+        base_shape = None
+        for i, s in enumerate(sv):
+            s_np = _np_from_tensor(s, f"sv[{i}]")
+            _validate_3d(f"sv[{i}]", s_np)
+            if base_shape is None:
+                base_shape = s_np.shape
+            elif s_np.shape != base_shape:
+                raise ValueError(
+                    f"sv[{i}] shape {s_np.shape} != sv[0] shape {base_shape}"
+                )
+            sv_np.append(np.abs(s_np))
+        sv_abs = np.mean(np.stack(sv_np, axis=0), axis=0)  # (N, C, T)
+    else:
+        sv_abs = _np_from_tensor(sv, "sv")
+        _validate_3d("sv", sv_abs)
+        sv_abs = np.abs(sv_abs)  # (N, C, T)
+
+    # Per-sample, per-channel mean over time: (N, C)
+    imp_per_sample = sv_abs.mean(axis=2)
+    N_eff, C = imp_per_sample.shape
+
+    # Means and dispersion across samples
+    ddof = 1 if N_eff > 1 else 0
+    imp_mean = imp_per_sample.mean(axis=0)  # (C,)
+    imp_std = imp_per_sample.std(axis=0, ddof=ddof)  # (C,)
+    imp_sem = imp_std / np.sqrt(max(N_eff, 1))  # (C,)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        imp_cv = np.where(imp_mean > 0, imp_std / np.maximum(imp_mean, 1e-12), np.inf)
+
+    # Rank channels by mean importance
+    order = np.argsort(-imp_mean)
+
+    # Build table
+    lines = []
+    lines.append("SHAP channel importance (mean±SEM), stability")
+    lines.append("ch\tmean\t\tSEM\t\tCV\tflag")
+    for ch in order:
+        mean = float(imp_mean[ch])
+        sem = float(imp_sem[ch])
+        cv = float(imp_cv[ch])
+        flag = "STABLE" if cv < 0.25 else ("OK" if cv < 0.5 else "NOISY")
+        lines.append(f"{ch:02d}\t{mean:.4g}\t{sem:.4g}\t{cv:.2f}\t{flag}")
+
+    # Guidance focusing on the top-3 channels
+    top3 = order[:3]
+    high_cv = [int(c) for c in top3 if imp_cv[c] >= 0.5]
+    if high_cv:
+        lines.append(
+            f"\nTop channels {high_cv} flagged NOISY (CV ≥ 0.5). "
+            "Increase --shap-n (more samples) first; if still noisy, raise --shap-bg. "
+            "Lower --shap-stride for finer temporal detail (slower)."
+        )
+    else:
+        lines.append("\nTop channels look stable (CV < 0.5).")
+
+    return "\n".join(lines)
+
+
+# ------------------------------------------------------------------------------
+# main
 # ------------------------------------------------------------------------------
 def main(
+    *,
+    parsed_args: argparse.Namespace | None = None,
     enable_ovr: Optional[bool] = None,
     ovr_classes: Optional[set[str]] = None,
     fold_override: Optional[int] = None,
+    prefer: str | None = None,
+    shap_profile: str = "medium",
+    shap_n: Optional[int] = None,
+    shap_bg: Optional[int] = None,
+    shap_stride: Optional[int] = None,
 ) -> None:
     """
     Entry point for evaluating the latest training run.
@@ -337,15 +482,53 @@ def main(
       * Restore the trained model for that entry and run inference.
       * Print a classification report and call evaluate_and_plot to save
         artifacts.
+      * Optionally compute a SHAP channel-importance summary with bounded cost.
 
     Args:
-        fold_override: Optional 1-based fold index (overrides any fold in
-        config/summary).
+        parsed_args: Optional passed in arguments
+        enable_ovr: Optional boolen for whether one-versus-rest plots are made
+        ovr_classes: Optional value for which list of classes for which to do
+            one-versus-rest plots
+        fold_override: Optional 1-based fold index (overrides any fold in config/summary)
+        shap_profile: off|fast|medium|thorough|custom
+        shap_n, shap_bg, shap_stride: used when shap_profile='custom'
 
     Raises:
         FileNotFoundError / ValueError on missing/malformed artifacts.
     """
-    t0 = time.time()
+    start_time = time.time()  # <— job timer (don’t shadow this)
+
+    # --- normalize args into a single Namespace ---
+    if parsed_args is not None:
+        args = parsed_args
+    else:
+        # If any override is provided, build a Namespace from overrides.
+        if any(
+            v is not None
+            for v in (
+                enable_ovr,
+                ovr_classes,
+                fold_override,
+                prefer,
+                shap_profile,
+                shap_n,
+                shap_bg,
+                shap_stride,
+            )
+        ):
+            args = argparse.Namespace(
+                enable_ovr=enable_ovr,
+                ovr_classes=ovr_classes,
+                fold=fold_override,
+                prefer=prefer or "auto",
+                shap_profile=shap_profile or "medium",
+                shap_n=shap_n,
+                shap_bg=shap_bg,
+                shap_stride=shap_stride,
+            )
+        else:
+            # Normal CLI path
+            args = parse_evaluate_args()
 
     # Find & load the newest config file
     config_path = _latest_config_path()
@@ -400,38 +583,120 @@ def main(
     dataset = TensorDataset(X_tensor, y_tensor)
     dataloader = DataLoader(dataset, batch_size=config.batch_size, shuffle=False)
 
-    # Load and pick best summary entry (or forced fold)
-    summaries = _read_summary(tag)
-    best = _select_best_entry(summaries, fold_override=fold_override)
+    # Decide which run to evaluate based on --prefer
+    best = None  # dict with keys like model, model_path, fold, best_epoch
+
+    if args.prefer in ("accuracy", "loss", "auto"):
+        # Use the most recent "really_the_best_*.json" to decide
+        best_json = max(
+            RESULTS_DIR.glob("really_the_best_*.json"),
+            key=lambda p: p.stat().st_mtime,
+            default=None,
+        )
+        if best_json is not None:
+            payload = json.loads(best_json.read_text())
+            by_acc = payload.get("by_accuracy")
+            by_loss = payload.get("by_loss")
+
+            if args.prefer == "accuracy":
+                best = by_acc or by_loss
+            elif args.prefer == "loss":
+                best = by_loss or by_acc
+            else:  # auto: prefer accuracy if present, else loss
+                best = by_acc or by_loss
+
+            if best is not None:
+                print(f"[prefer={args.prefer}] Using selection from {best_json.name}")
+
+    elif args.prefer == "latest":
+        # Ignore best.json; pick newest checkpoint directly
+        latest_ckpt = max(
+            MODELS_DIR.glob("model_best_*_fold*.pth"),
+            key=lambda p: p.stat().st_mtime,
+            default=None,
+        )
+        if latest_ckpt is not None:
+            # Derive tag/fold from filename
+            m = re.search(r"model_best_(.+?)_fold(\d+)\.pth$", latest_ckpt.name)
+            chosen_tag = m.group(1) if m else None
+            fold_idx = int(m.group(2)) if m else None
+
+            # Pull minimal info from the matching history file
+            be = val_acc = val_loss = train_acc = train_loss = None
+            if chosen_tag and fold_idx is not None:
+                hist_path = HISTORY_DIR / f"history_{chosen_tag}_fold{fold_idx}.json"
+                if hist_path.exists():
+                    h = json.loads(hist_path.read_text())
+                    be = h.get("best_epoch")
+                    val_acc = h.get("val_acc")
+                    val_loss = h.get("val_loss")
+                    train_acc = h.get("train_acc")
+                    train_loss = h.get("train_loss")
+
+            # Try to extract model name from tag; fall back to config.model
+            model_name = None
+            if chosen_tag:
+                parts = chosen_tag.split("_")
+                if len(parts) >= 2:
+                    model_name = parts[1]
+
+            best = {
+                "model": model_name or config.model,
+                "model_path": str(latest_ckpt),
+                "fold": fold_idx,
+                "best_epoch": be,
+                "val_accs": val_acc,
+                "val_losses": val_loss,
+                "train_accs": train_acc,
+                "train_losses": train_loss,
+            }
+            print(f"[prefer=latest] Using newest checkpoint: {latest_ckpt.name}")
+
+    # Fallback: no best JSON, or missing entry, or latest failed
+    if best is None:
+        summaries = _read_summary(tag)
+        best = _select_best_entry(summaries, fold_override=fold_override)
+        print(f"[prefer={args.prefer}] Using fallback selection from summary")
 
     # Extract model path / fold / epoch from the chosen entry
-    best_model_path = Path(best.get("model_path", ""))
-    if not best_model_path:
+    mp = best.get("model_path")
+    if not mp:
         raise ValueError("Chosen summary entry lacks 'model_path'.")
+    best_model_path = Path(mp)
     if not best_model_path.exists():
         raise FileNotFoundError(f"Model weights not found: {best_model_path}")
 
+    # Fold / epoch from the chosen entry; allow --fold to override
     best_fold = best.get("fold")
     if fold_override is not None:
         best_fold = fold_override
+    chosen_fold = int(best_fold) if best_fold is not None else None
 
     best_epoch = best.get("best_epoch")
 
     print(
-        f"Evaluating best model from fold {best_fold if best_fold is not None else 'N/A'} "
+        f"Evaluating best model from fold {chosen_fold if chosen_fold is not None else 'N/A'} "
         f"(epoch {best_epoch})"
     )
     print(f"Loading model: {best_model_path.name}")
 
-    # Build & restore the model
-    if config.model not in MODEL_CLASSES:
-        raise ValueError(
-            f"Unknown model '{config.model}'. Add it to ecg_cnn.models.MODEL_CLASSES."
-        )
+    # IMPORTANT: when 'best' comes from really_the_best_*.json, it includes the
+    # model class that produced the checkpoint. Use THAT (not config.model).
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model_cls = MODEL_CLASSES[config.model]
+
+    model_name = best.get("model") or config.model  # prefer chosen entry's model
+
+    if model_name not in MODEL_CLASSES:
+        raise ValueError(
+            f"Unknown model '{model_name}'. Add it to ecg_cnn.models.MODEL_CLASSES."
+        )
+
+    model_cls = MODEL_CLASSES[model_name]
     model = model_cls(num_classes=len(FIVE_SUPERCLASSES)).to(device)
-    model.load_state_dict(torch.load(best_model_path, map_location=device))
+
+    state = torch.load(best_model_path, map_location=device)
+    # strict=True ensures we don’t silently load a mismatched architecture
+    model.load_state_dict(state, strict=True)
     model.eval()
 
     # Inference
@@ -458,24 +723,16 @@ def main(
 
     avg_loss = total_loss / len(dataset) if len(dataset) > 0 else float("nan")
     print(f"Eval loss: {avg_loss:.4f}")
-    print(f"Evaluation completed in {(time.time() - t0) / 60:.2f} minutes.")
+    print(f"Evaluation completed in {(time.time() - start_time) / 60:.2f} minutes.")
 
     y_true = np.array(all_targets, dtype=int)
     y_pred = np.array(all_preds, dtype=int)
     y_probs = np.array(all_probs, dtype=np.float32)
 
-    print(f"best_fold:  {best_fold}")
-    print(f"tag:  {tag}")
     train_accs, val_accs, train_loss, val_loss = _load_history(tag, best_fold)
 
     y_true_ep = [int(x) for x in y_true]
     y_pred_ep = [int(x) for x in y_pred]
-
-    print(f"train_accs: {train_accs}")
-    print(f"val_accs: {val_accs}")
-    print(f"train_loss: {train_loss}")
-    print(f"val_loss: {val_loss}")
-    print(f"best_fold: {best_fold}")
 
     # Final composite plots + report
     evaluate_and_plot(
@@ -485,7 +742,7 @@ def main(
         val_accs=val_accs,
         train_losses=train_loss,
         val_losses=val_loss,
-        model=config.model,
+        model=model_name,  # config.model,
         lr=config.lr,
         bs=config.batch_size,
         wd=config.weight_decay,
@@ -500,47 +757,130 @@ def main(
         ovr_classes=ovr_classes_set,
     )
 
-    print(f"Elapsed time: {(time.time() - t0) / 60:.2f} minutes")
+    # --------------------------------------------------------------------------
+    # SHAP summary plot (profiled via --shap; 'off' skips entirely)
+    # Profiles map to (N, BG, STRIDE)
+    #   fast     -> (4,  4, 10)
+    #   medium   -> (8,  8, 5)
+    #   thorough -> (16, 16, 2)
+    #   custom   -> use --shap-n/--shap-bg/--shap-stride
+    # --------------------------------------------------------------------------
+    try:
+        if shap_profile and shap_profile.lower() != "off":
+            profiles = {
+                "fast": (4, 4, 10),
+                "medium": (8, 8, 5),
+                "thorough": (16, 16, 2),
+            }
+            if shap_profile == "custom":
+                n = int(shap_n if shap_n is not None else 8)
+                bg = int(shap_bg if shap_bg is not None else 8)
+                stride = int(shap_stride if shap_stride is not None else 5)
+            else:
+                if shap_profile not in profiles:
+                    print(f"Unknown --shap profile '{shap_profile}', using 'medium'.")
+                    shap_profile = "medium"
+                n, bg, stride = profiles[shap_profile]
+
+            # fresh loader so we don't rely on an exhausted dataloader
+            small_bs = min(max(8, int(getattr(config, "batch_size", 8))), 64)
+            small_loader = DataLoader(dataset, batch_size=small_bs, shuffle=False)
+
+            # gather up to n (no_grad only for data collection)
+            X_list: List[torch.Tensor] = []
+            with torch.no_grad():
+                for xb, _ in small_loader:
+                    X_list.append(xb.to(device))
+                    if sum(x.shape[0] for x in X_list) >= n:
+                        break
+
+            if not X_list:
+                print("SHAP: no batches available to explain.")
+            else:
+                # build explain batch and enforce caps
+                X_explain = torch.cat(X_list, dim=0)[:n]  # (N, C, T)
+
+                # optional time-axis downsample to bound cost
+                if stride > 1:
+                    X_explain = X_explain[:, :, ::stride]
+
+                # background from same distribution, capped
+                bg_t = shap_sample_background(X_explain, max_background=bg, seed=SEED)
+
+                # debug + timing
+                print(
+                    f"SHAP profile='{shap_profile}' -> N={X_explain.shape[0]}, "
+                    f"C={X_explain.shape[1]}, T={X_explain.shape[2]}, "
+                    f"BG={bg_t.shape[0]}, classes=5, device={device}"
+                )
+
+                shap_t0 = time.perf_counter()
+
+                # compute attributions (uses GradientExplainer in shap_compute_values)
+                sv = shap_compute_values(model, X_explain, bg_t, device=device)
+
+                print(_shap_stability_report(sv, class_names=FIVE_SUPERCLASSES))
+
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+                shap_t1 = time.perf_counter()
+                print(
+                    f"SHAP finished in {shap_t1 - shap_t0:.2f}s for the above config."
+                )
+
+                # save summary (under outputs/plots/)
+                fold_str = f"{best_fold}" if best_fold is not None else "NA"
+                fname = f"shap_summary_{config.model}_tag{tag}_fold{fold_str}_epoch{best_epoch}.png"
+                out = shap_save_channel_summary(sv, X_explain, PLOTS_DIR, fname)
+                print(f"Saved SHAP summary: {out}")
+        else:
+            if shap_profile and shap_profile.lower() == "off":
+                print("SHAP disabled (--shap off).")
+    except Exception as e:
+        # never let SHAP break evaluation
+        print(f"SHAP generation skipped/failed: {e}")
+    # --------------------------------------------------------------------------
+
+    # Derive fold_id once for report saving/aggregation
+    fold_id = None
+    if isinstance(best_fold, int) and best_fold > 0:
+        fold_id = best_fold
+    elif isinstance(best_model_path, Path):
+        m = re.search(r"fold(\d+)", best_model_path.name)
+        if m:
+            fold_id = int(m.group(1))
+    if fold_id is None:
+        fold_id = 1
+
+    # Persist CR CSV for this fold (silent) and aggregate (silent).
+    if (
+        isinstance(y_true, (list, np.ndarray))
+        and isinstance(y_pred, (list, np.ndarray))
+        and len(y_true) > 0
+        and len(y_true) == len(y_pred)
+    ):
+        save_classification_report_csv(y_true, y_pred, REPORTS_DIR, tag, fold_id)
+        save_fold_summary_csv(REPORTS_DIR, tag)
+    else:
+        print(
+            f"Skipping classification report CSV/summary for fold {fold_id}: "
+            "no predictions available or length mismatch."
+        )
+
+    # Always report elapsed time
+    print(f"Elapsed time: {(time.time() - start_time) / 60:.2f} minutes")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Evaluate the most recent training config (or a forced fold)."
-    )
-    parser.add_argument(
-        "--fold",
-        type=int,
-        default=None,
-        help="Optional 1-based fold index. If omitted, selects the best by lowest loss.",
-    )
 
-    # Enalbe flag viea mutually exclusive group
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument(
-        "--enable_ovr",
-        dest="enable_ovr",
-        action="store_const",
-        const=True,
-        default=None,  # None = no CLI override; defer to config or env
-        help="Enable one-vs-rese plots. Overrides config and env.",
-    )
-    group.add_argument(
-        "--disable_ovr",
-        dest="enable_ovr",
-        action="store_const",
-        const=False,
-        help="Disable one-vs-rest plots. Overrieds config and env.",
-    )
-    parser.add_argument(
-        "--ovr_classes",
-        type=lambda s: [x.strip() for x in s.split(",") if x.strip()],
-        default=None,
-        help="Comma-separated class names for OvR analysis (e.g., 'MI, NORM')."
-        "Implies --enable_ovr unless --disable_ovr is set.",
-    )
-    args = parser.parse_args()
+    args = parse_evaluate_args()
     main(
         enable_ovr=args.enable_ovr,
         ovr_classes=args.ovr_classes,
         fold_override=args.fold,
+        prefer=args.prefer,
+        shap_profile=args.shap_profile,
+        shap_n=args.shap_n,
+        shap_bg=args.shap_bg,
+        shap_stride=args.shap_stride,
     )
