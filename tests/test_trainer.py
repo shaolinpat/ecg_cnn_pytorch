@@ -44,21 +44,16 @@ from pathlib import Path
 from torch.utils.data import DataLoader, TensorDataset
 from torch.optim.lr_scheduler import OneCycleLR
 
-# from types import SimpleNamespace
-
 from ecg_cnn.config.config_loader import TrainConfig
 from ecg_cnn.data import data_utils
 from ecg_cnn.models import model_utils
-from ecg_cnn.training import trainer
+from ecg_cnn.training import training_utils, trainer
 from ecg_cnn.training.trainer import (
     _DATASET_CACHE,
     train_one_epoch,
     evaluate_on_validation,
     run_training,
 )
-from ecg_cnn.training import training_utils, trainer
-
-import ecg_cnn.utils.plot_utils as plot_utils
 
 
 # ------------------------------------------------------------------------------
@@ -320,259 +315,158 @@ def test_train_one_epoch_onecycle_steps_scheduler(monkeypatch):
     assert opt.param_groups[0]["lr"] != 1e-3
 
 
-# def test_run_training_cosine_branch_hits_init_and_epoch_step(monkeypatch):
-#     """Covers cosine init and epoch-level scheduler.step."""
-#     # --- Sandbox any filesystem writes so nothing touches repo outputs/ ---
-#     # Point trainer to a harmless temp area via env; also neuter writers.
-#     tmp = Path(os.getenv("PYTEST_TMPDIR", "/tmp")) / "ecg_sbx_cosine"
-#     (tmp / "models").mkdir(parents=True, exist_ok=True)
-#     (tmp / "history").mkdir(parents=True, exist_ok=True)
-#     (tmp / "artifacts").mkdir(parents=True, exist_ok=True)
+def test_run_training_cosine_branch_hits_init_and_epoch_step(monkeypatch):
+    """Covers cosine init and epoch-level scheduler.step without touching PTB-XL data or real ECGConvNet."""
 
-#     monkeypatch.setenv("ECG_CNN_OUTPUT_DIR", str(tmp))
-#     monkeypatch.setenv("ECG_CNN_RESULTS_DIR", str(tmp / "results"))
-
-#     # Make any checkpoint/history writes no-ops for this test
-#     monkeypatch.setattr("torch.save", lambda *a, **k: None, raising=False)
-#     monkeypatch.setattr("json.dump", lambda *a, **k: None, raising=False)
-
-#     # NEW: redirect the *module-level constants* the trainer is using
-#     monkeypatch.setattr(trainer, "MODELS_DIR", tmp / "models", raising=False)
-#     monkeypatch.setattr(trainer, "HISTORY_DIR", tmp / "history", raising=False)
-#     monkeypatch.setattr(trainer, "ARTIFACTS_DIR", tmp / "artifacts", raising=False)
-
-#     monkeypatch.setenv("ECG_SCHEDULER", "cosine")
-#     monkeypatch.setenv("ECG_SCHED_TMAX", "2")
-
-#     # Derive the number of classes from trainer (default to 2 if absent)
-#     _NC = len(getattr(trainer, "FIVE_SUPERCLASSES", [])) or 2
-
-#     class _TinyNet(nn.Module):
-#         def __init__(self, in_ch: int = 12, n_classes: int = _NC):
-#             super().__init__()
-#             self.features = nn.Sequential(
-#                 nn.Conv1d(in_ch, 8, kernel_size=3, padding=1),
-#                 nn.ReLU(),
-#                 nn.AdaptiveAvgPool1d(1),  # collapse time dimension robustly
-#             )
-#             # LazyLinear infers in_features at first forward, so no shape guessing
-#             self.head = nn.Sequential(
-#                 nn.Flatten(),
-#                 nn.LazyLinear(n_classes),
-#             )
-
-#         def forward(self, x):
-#             x = self.features(x)
-#             return self.head(x)
-
-#     # Point the trainer’s model registry/name to the tiny model
-#     if hasattr(trainer, "MODEL_CLASSES") and isinstance(trainer.MODEL_CLASSES, dict):
-#         _reg = dict(trainer.MODEL_CLASSES)
-#         _reg["ECGConvNet"] = _TinyNet
-#         monkeypatch.setattr(trainer, "MODEL_CLASSES", _reg, raising=False)
-#     else:
-#         # Fallback if trainer constructs ECGConvNet directly
-#         monkeypatch.setattr(trainer, "ECGConvNet", _TinyNet, raising=False)
-
-#     monkeypatch.setattr(data_utils, "load_ptbxl_sample", _fake_sample)
-
-#     # Add this one line so the symbol used inside trainer is replaced too
-#     monkeypatch.setattr(trainer, "load_ptbxl_sample", _fake_sample, raising=False)
-
-#     cfg = TrainConfig(
-#         model="ECGConvNet",
-#         lr=1e-3,
-#         batch_size=8,
-#         weight_decay=5e-4,
-#         n_epochs=2,  # ensures Cosine .step() executes at least once
-#         save_best=True,
-#         sample_only=True,
-#         subsample_frac=1.0,
-#         sampling_rate=100,
-#         data_dir=None,
-#         sample_dir=None,
-#         n_folds=2,
-#         verbose=False,
-#     )
-
-#     summary = trainer.run_training(cfg, fold_idx=0, tag="cov_cosine")
-#     assert isinstance(summary, dict)
-#     assert "loss" in summary and "best_epoch" in summary
-
-
-# def test_run_training_onecycle_branch_hits_init_and_inline_loop(monkeypatch):
-#     """Covers OneCycle init and inline batch loop with per-batch step."""
-#     # --- Sandbox any filesystem writes so nothing touches repo outputs/ ---
-#     tmp = Path(os.getenv("PYTEST_TMPDIR", "/tmp")) / "ecg_sbx_onecycle"
-#     (tmp / "models").mkdir(parents=True, exist_ok=True)
-#     (tmp / "history").mkdir(parents=True, exist_ok=True)
-#     (tmp / "artifacts").mkdir(parents=True, exist_ok=True)
-
-#     # Redirect trainer's module-level dirs used for saving
-#     monkeypatch.setattr(trainer, "MODELS_DIR", tmp / "models", raising=False)
-#     monkeypatch.setattr(trainer, "HISTORY_DIR", tmp / "history", raising=False)
-#     monkeypatch.setattr(trainer, "ARTIFACTS_DIR", tmp / "artifacts", raising=False)
-
-#     # Make checkpoint/history writes no-ops
-#     monkeypatch.setattr("torch.save", lambda *a, **k: None, raising=False)
-#     monkeypatch.setattr("json.dump", lambda *a, **k: None, raising=False)
-
-#     monkeypatch.setenv("ECG_SCHEDULER", "onecycle")
-#     monkeypatch.setenv("ECG_SCHED_MAX_LR", "0.0015")
-#     monkeypatch.setenv("ECG_SCHED_PCT_START", "0.3")
-#     monkeypatch.setenv("ECG_SCHED_DIV", "25")
-#     monkeypatch.setenv("ECG_SCHED_FINAL_DIV", "10000")
-
-#     def _fake_sample(sample_dir=None, ptb_path=None):
-#         X = np.random.randn(12, 1, 32).astype(np.float32)
-#         y = np.array(["MI", "NORM"] * 6)
-#         return X, y, torch.zeros(len(y))
-
-#     monkeypatch.setattr(data_utils, "load_ptbxl_sample", _fake_sample)
-
-#     cfg = TrainConfig(
-#         model="ECGConvNet",
-#         lr=1e-3,
-#         batch_size=6,
-#         weight_decay=5e-4,
-#         n_epochs=2,  # triggers inline loop for at least one epoch
-#         save_best=True,
-#         sample_only=True,
-#         subsample_frac=1.0,
-#         sampling_rate=100,
-#         data_dir=None,
-#         sample_dir=None,
-#         n_folds=2,
-#         verbose=False,
-#     )
-
-#     summary = trainer.run_training(cfg, fold_idx=0, tag="cov_onecycle_inline")
-#     # sanity: we got a summary dict back
-#     assert isinstance(summary, dict) and "loss" in summary and "best_epoch" in summary
-
-
-# ====================================================================
-# Scheduler coverage tests (robust patches; no PTB-XL access required)
-# ====================================================================
-import os
-import json
-import numpy as np
-import pandas as pd
-import torch
-import torch.nn as nn
-from pathlib import Path
-
-from ecg_cnn.training import trainer
-from ecg_cnn.training.trainer import TrainConfig
-from ecg_cnn.data import data_utils
-from ecg_cnn.models import model_utils
-
-# We will also patch the concrete module where ECGConvNet usually lives
-import importlib
-
-_ecgconvnet_mod = None
-try:
-    _ecgconvnet_mod = importlib.import_module("ecg_cnn.models.ecgconvnet")
-except Exception:
-    _ecgconvnet_mod = None
-
-
-def _sandbox_io(monkeypatch, tmp: Path):
+    tmp = Path(os.getenv("PYTEST_TMPDIR", "/tmp")) / "ecg_sbx_cosine"
     (tmp / "models").mkdir(parents=True, exist_ok=True)
     (tmp / "history").mkdir(parents=True, exist_ok=True)
     (tmp / "artifacts").mkdir(parents=True, exist_ok=True)
-
     monkeypatch.setenv("ECG_CNN_OUTPUT_DIR", str(tmp))
     monkeypatch.setenv("ECG_CNN_RESULTS_DIR", str(tmp / "results"))
-
     monkeypatch.setattr("torch.save", lambda *a, **k: None, raising=False)
     monkeypatch.setattr("json.dump", lambda *a, **k: None, raising=False)
-
     monkeypatch.setattr(trainer, "MODELS_DIR", tmp / "models", raising=False)
     monkeypatch.setattr(trainer, "HISTORY_DIR", tmp / "history", raising=False)
     monkeypatch.setattr(trainer, "ARTIFACTS_DIR", tmp / "artifacts", raising=False)
 
+    # --- force cosine scheduler branch ---
+    monkeypatch.setenv("ECG_SCHEDULER", "cosine")
+    monkeypatch.setenv("ECG_SCHED_TMAX", "2")
 
-def _patch_model_everywhere_to_tinynet(monkeypatch):
-    """
-    Force ECGConvNet -> _TinyNet no matter how the trainer constructs it:
-    - direct class on trainer
-    - registries on trainer/model_utils
-    - factory functions
-    - the concrete module ecg_cnn.models.ecgconvnet.ECGConvNet
-    """
+    # --- force a 2-class universe to match fake labels ---
+    monkeypatch.setattr(trainer, "FIVE_SUPERCLASSES", ["MI", "NORM"], raising=False)
+    monkeypatch.setattr(model_utils, "FIVE_SUPERCLASSES", ["MI", "NORM"], raising=False)
 
-    n_classes = len(getattr(trainer, "FIVE_SUPERCLASSES", [])) or 2
-
+    # --- tiny, shape-agnostic model to avoid FC size issues ---
     class _TinyNet(nn.Module):
-        def __init__(
-            self,
-            in_ch: int = 12,
-            n_classes: int | None = None,
-            num_classes: int | None = None,
-            out_classes: int | None = None,
-            **_ignore,
-        ):
+        def __init__(self, in_ch: int = 12, n_classes: int = 2, **_):
             super().__init__()
-            n_cls = (
-                n_classes
-                if n_classes is not None
-                else (
-                    num_classes
-                    if num_classes is not None
-                    else (out_classes if out_classes is not None else n_classes)
-                )
-            )
-            if n_cls is None:
-                n_cls = (
-                    n_classes
-                    if n_classes is not None
-                    else (len(getattr(trainer, "FIVE_SUPERCLASSES", [])) or 2)
-                )
             self.features = nn.Sequential(
                 nn.Conv1d(in_ch, 8, kernel_size=3, padding=1),
                 nn.ReLU(),
                 nn.AdaptiveAvgPool1d(1),
             )
-            self.head = nn.Sequential(nn.Flatten(), nn.LazyLinear(n_cls))
+            self.head = nn.Sequential(nn.Flatten(), nn.LazyLinear(n_classes))
 
         def forward(self, x):
             return self.head(self.features(x))
 
-    # Direct symbols
+    # patch every plausible construction path to resolve ECGConvNet -> _TinyNet
     monkeypatch.setattr(trainer, "ECGConvNet", _TinyNet, raising=False)
+    reg_t = dict(getattr(trainer, "MODEL_CLASSES", {}))
+    reg_t["ECGConvNet"] = _TinyNet
+    monkeypatch.setattr(trainer, "MODEL_CLASSES", reg_t, raising=False)
     monkeypatch.setattr(model_utils, "ECGConvNet", _TinyNet, raising=False)
-
-    # Registries
-    reg_tr = dict(getattr(trainer, "MODEL_CLASSES", {}))
-    reg_tr["ECGConvNet"] = _TinyNet
-    monkeypatch.setattr(trainer, "MODEL_CLASSES", reg_tr, raising=False)
-
     reg_mu = dict(getattr(model_utils, "MODEL_CLASSES", {}))
     reg_mu["ECGConvNet"] = _TinyNet
     monkeypatch.setattr(model_utils, "MODEL_CLASSES", reg_mu, raising=False)
+    if hasattr(trainer, "get_model"):
+        monkeypatch.setattr(
+            trainer, "get_model", lambda *_a, **kw: _TinyNet(**kw), raising=False
+        )
+    if hasattr(model_utils, "get_model"):
+        monkeypatch.setattr(
+            model_utils, "get_model", lambda *_a, **kw: _TinyNet(**kw), raising=False
+        )
 
-    # Factories
-    for mod in (trainer, model_utils):
-        for fname in ("get_model", "build_model", "_get_model"):
-            if hasattr(mod, fname):
-                monkeypatch.setattr(
-                    mod, fname, lambda *a, **kw: _TinyNet(**kw), raising=False
-                )
-
-    # Concrete module (most robust): ecg_cnn.models.ecgconvnet.ECGConvNet
-    if _ecgconvnet_mod is not None:
-        try:
-            monkeypatch.setattr(_ecgconvnet_mod, "ECGConvNet", _TinyNet, raising=False)
-        except Exception:
-            pass
-
-
-def _patch_sample_loader(monkeypatch, N: int):
-    """Return 12-lead short sequences and a .loc-capable meta; patch both names."""
-
+    # --- fake sample loader: (N, 12, 32) + .loc-capable meta ---
     def _fake_sample(sample_dir=None, ptb_path=None):
-        C, T = 12, 32
+        N, C, T = 16, 12, 32
+        X = np.random.randn(N, C, T).astype(np.float32)
+        y = np.array(["MI", "NORM"] * (N // 2))
+        meta = pd.DataFrame(
+            {"superclass": y, "strat_fold": np.array([0, 1] * (N // 2))},
+            index=np.arange(N),
+        )
+        return X, y, meta
+
+    # patch both the defining module and the import-bound symbol inside trainer
+    monkeypatch.setattr(data_utils, "load_ptbxl_sample", _fake_sample)
+    monkeypatch.setattr(trainer, "load_ptbxl_sample", _fake_sample, raising=False)
+
+    # --- run ---
+    cfg = TrainConfig(
+        model="ECGConvNet",
+        lr=1e-3,
+        batch_size=8,
+        weight_decay=5e-4,
+        n_epochs=2,  # at least one epoch step
+        save_best=True,
+        sample_only=True,
+        subsample_frac=1.0,
+        sampling_rate=100,
+        data_dir=None,
+        sample_dir=None,
+        n_folds=2,
+        verbose=False,
+    )
+    summary = trainer.run_training(cfg, fold_idx=0, tag="cov_cosine")
+    assert isinstance(summary, dict)
+    assert "loss" in summary and "best_epoch" in summary
+
+
+def test_run_training_onecycle_branch_hits_init_and_inline_loop(monkeypatch):
+    """Covers OneCycle init and per-batch inline stepping without touching PTB-XL data or real ECGConvNet."""
+
+    tmp = Path(os.getenv("PYTEST_TMPDIR", "/tmp")) / "ecg_sbx_onecycle"
+    (tmp / "models").mkdir(parents=True, exist_ok=True)
+    (tmp / "history").mkdir(parents=True, exist_ok=True)
+    (tmp / "artifacts").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("ECG_CNN_OUTPUT_DIR", str(tmp))
+    monkeypatch.setenv("ECG_CNN_RESULTS_DIR", str(tmp / "results"))
+    monkeypatch.setattr("torch.save", lambda *a, **k: None, raising=False)
+    monkeypatch.setattr("json.dump", lambda *a, **k: None, raising=False)
+    monkeypatch.setattr(trainer, "MODELS_DIR", tmp / "models", raising=False)
+    monkeypatch.setattr(trainer, "HISTORY_DIR", tmp / "history", raising=False)
+    monkeypatch.setattr(trainer, "ARTIFACTS_DIR", tmp / "artifacts", raising=False)
+
+    # --- force OneCycle scheduler branch ---
+    monkeypatch.setenv("ECG_SCHEDULER", "onecycle")
+    monkeypatch.setenv("ECG_SCHED_MAX_LR", "0.0015")
+    monkeypatch.setenv("ECG_SCHED_PCT_START", "0.3")
+    monkeypatch.setenv("ECG_SCHED_DIV", "25")
+    monkeypatch.setenv("ECG_SCHED_FINAL_DIV", "10000")
+
+    # --- force a 2-class universe to match fake labels ---
+    monkeypatch.setattr(trainer, "FIVE_SUPERCLASSES", ["MI", "NORM"], raising=False)
+    monkeypatch.setattr(model_utils, "FIVE_SUPERCLASSES", ["MI", "NORM"], raising=False)
+
+    # --- tiny, shape-agnostic model ---
+    class _TinyNet(nn.Module):
+        def __init__(self, in_ch: int = 12, n_classes: int = 2, **_):
+            super().__init__()
+            self.features = nn.Sequential(
+                nn.Conv1d(in_ch, 8, kernel_size=3, padding=1),
+                nn.ReLU(),
+                nn.AdaptiveAvgPool1d(1),
+            )
+            self.head = nn.Sequential(nn.Flatten(), nn.LazyLinear(n_classes))
+
+        def forward(self, x):
+            return self.head(self.features(x))
+
+    # patch every plausible construction path to resolve ECGConvNet -> _TinyNet
+    monkeypatch.setattr(trainer, "ECGConvNet", _TinyNet, raising=False)
+    reg_t = dict(getattr(trainer, "MODEL_CLASSES", {}))
+    reg_t["ECGConvNet"] = _TinyNet
+    monkeypatch.setattr(trainer, "MODEL_CLASSES", reg_t, raising=False)
+    monkeypatch.setattr(model_utils, "ECGConvNet", _TinyNet, raising=False)
+    reg_mu = dict(getattr(model_utils, "MODEL_CLASSES", {}))
+    reg_mu["ECGConvNet"] = _TinyNet
+    monkeypatch.setattr(model_utils, "MODEL_CLASSES", reg_mu, raising=False)
+    if hasattr(trainer, "get_model"):
+        monkeypatch.setattr(
+            trainer, "get_model", lambda *_a, **kw: _TinyNet(**kw), raising=False
+        )
+    if hasattr(model_utils, "get_model"):
+        monkeypatch.setattr(
+            model_utils, "get_model", lambda *_a, **kw: _TinyNet(**kw), raising=False
+        )
+
+    # --- fake sample loader: (N, 12, 32) + .loc-capable meta ---
+    def _fake_sample(sample_dir=None, ptb_path=None):
+        N, C, T = 12, 12, 32
         X = np.random.randn(N, C, T).astype(np.float32)
         y = np.array(["MI", "NORM"] * (N // 2))
         meta = pd.DataFrame(
@@ -584,75 +478,13 @@ def _patch_sample_loader(monkeypatch, N: int):
     monkeypatch.setattr(data_utils, "load_ptbxl_sample", _fake_sample)
     monkeypatch.setattr(trainer, "load_ptbxl_sample", _fake_sample, raising=False)
 
-
-def test_run_training_cosine_branch_hits_init_and_epoch_step(monkeypatch):
-    """Covers cosine init and epoch-level scheduler.step with no PTB-XL access."""
-    tmp = Path(os.getenv("PYTEST_TMPDIR", "/tmp")) / "ecg_sbx_cosine"
-    _sandbox_io(monkeypatch, tmp)
-
-    # Force a 2-class universe so weights and logits agree
-    monkeypatch.setattr(trainer, "FIVE_SUPERCLASSES", ["MI", "NORM"], raising=False)
-    monkeypatch.setattr(model_utils, "FIVE_SUPERCLASSES", ["MI", "NORM"], raising=False)
-
-    # Force cosine branch
-    monkeypatch.setenv("ECG_SCHEDULER", "cosine")
-    monkeypatch.setenv("ECG_SCHED_TMAX", "2")
-
-    # Ensure a tiny model is used regardless of construction path
-    _patch_model_everywhere_to_tinynet(monkeypatch)
-
-    # Fake sample loader (N divisible by folds and batch)
-    _patch_sample_loader(monkeypatch, N=16)
-
-    cfg = TrainConfig(
-        model="ECGConvNet",
-        lr=1e-3,
-        batch_size=8,
-        weight_decay=5e-4,
-        n_epochs=2,  # ensures epoch-level scheduler.step executes
-        save_best=True,
-        sample_only=True,
-        subsample_frac=1.0,
-        sampling_rate=100,
-        data_dir=None,
-        sample_dir=None,
-        n_folds=2,
-        verbose=False,
-    )
-
-    summary = trainer.run_training(cfg, fold_idx=0, tag="cov_cosine")
-    assert isinstance(summary, dict)
-    assert "loss" in summary and "best_epoch" in summary
-
-
-def test_run_training_onecycle_branch_hits_init_and_inline_loop(monkeypatch):
-    """Covers OneCycle init and per-batch inline stepping with no PTB-XL access."""
-    tmp = Path(os.getenv("PYTEST_TMPDIR", "/tmp")) / "ecg_sbx_onecycle"
-    _sandbox_io(monkeypatch, tmp)
-
-    # Force a 2-class universe so weights and logits agree
-    monkeypatch.setattr(trainer, "FIVE_SUPERCLASSES", ["MI", "NORM"], raising=False)
-    monkeypatch.setattr(model_utils, "FIVE_SUPERCLASSES", ["MI", "NORM"], raising=False)
-
-    # Force OneCycle branch
-    monkeypatch.setenv("ECG_SCHEDULER", "onecycle")
-    monkeypatch.setenv("ECG_SCHED_MAX_LR", "0.0015")
-    monkeypatch.setenv("ECG_SCHED_PCT_START", "0.3")
-    monkeypatch.setenv("ECG_SCHED_DIV", "25")
-    monkeypatch.setenv("ECG_SCHED_FINAL_DIV", "10000")
-
-    # Ensure a tiny model is used regardless of construction path
-    _patch_model_everywhere_to_tinynet(monkeypatch)
-
-    # Fake sample loader; N works with batch_size=6, n_folds=2
-    _patch_sample_loader(monkeypatch, N=12)
-
+    # --- run ---
     cfg = TrainConfig(
         model="ECGConvNet",
         lr=1e-3,
         batch_size=6,
         weight_decay=5e-4,
-        n_epochs=2,  # inline per-batch stepping path will run
+        n_epochs=2,  # triggers per-batch stepping
         save_best=True,
         sample_only=True,
         subsample_frac=1.0,
@@ -662,7 +494,6 @@ def test_run_training_onecycle_branch_hits_init_and_inline_loop(monkeypatch):
         n_folds=2,
         verbose=False,
     )
-
     summary = trainer.run_training(cfg, fold_idx=0, tag="cov_onecycle_inline")
     assert isinstance(summary, dict)
     assert "loss" in summary and "best_epoch" in summary
@@ -945,7 +776,6 @@ def test_run_training_with_folds_writes_history_and_tagged_names(
     patch_trainer_minimal, tmp_path, monkeypatch
 ):
     # Redirect trainer's module-level paths into the tmp sandbox
-
     hist_dir = tmp_path / "history"
     models_dir = tmp_path / "models"
     artifacts_dir = tmp_path / "artifacts"  # where CR CSVs go
@@ -979,10 +809,6 @@ def test_run_training_with_folds_writes_history_and_tagged_names(
     assert len(hist["train_acc"]) == cfg.n_epochs
     assert len(hist["val_loss"]) == cfg.n_epochs
     assert len(hist["val_acc"]) == cfg.n_epochs
-
-    # (Optional) if your patched trainer returns fixed metrics, keep these:
-    # assert hist["val_loss"][-1] == pytest.approx(0.42, rel=0, abs=1e-6)
-    # assert hist["val_acc"][-1] == pytest.approx(0.66,  rel=0, abs=1e-6)
 
     # Classification report CSV should also be in the sandbox (since val loader exists)
     cr_csv = artifacts_dir / "classification_report_demo_tag_fold1.csv"
@@ -1133,7 +959,6 @@ def test_run_training_cache_hit_assigns(monkeypatch, tmp_path):
             self.fc = torch.nn.Linear(10, num_classes)
 
         def forward(self, x):
-            # return self.fc(x.mean(dim=-1))  # [N, 1, 10] -> [N, 2]
             return self.fc(x.mean(dim=1))  # [N, 1, 10] -> [N, 10]
 
     monkeypatch.setattr(
