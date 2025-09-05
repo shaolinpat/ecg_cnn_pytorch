@@ -1,0 +1,11 @@
+# configs/sample.yaml
+model: ECGResNet
+batch_size: [32, 64]
+lr: 0.001
+weight_decay: 0.0
+n_epochs: 2
+n_folds: 2
+
+# <- these two lines make it use the tiny bundled data
+sample_only: true
+sample_dir: data/sample

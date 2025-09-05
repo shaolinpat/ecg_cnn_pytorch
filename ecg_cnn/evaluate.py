@@ -52,7 +52,7 @@ from torch.utils.data import TensorDataset, DataLoader
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from ecg_cnn.config.config_loader import load_training_config, TrainConfig
-from ecg_cnn.data.data_utils import load_ptbxl_full, FIVE_SUPERCLASSES
+from ecg_cnn.data.data_utils import load_ptbxl_full, load_ptbxl_sample, FIVE_SUPERCLASSES
 from ecg_cnn.models import MODEL_CLASSES
 from ecg_cnn.paths import (
     ARTIFACTS_DIR,
@@ -563,11 +563,39 @@ def main(
 
     # Load data for evaluation (same settings as training)
     print("Loading data for evaluation...")
-    X, y, meta = load_ptbxl_full(
-        data_dir=PTBXL_DATA_DIR,
-        subsample_frac=config.subsample_frac,
-        sampling_rate=config.sampling_rate,
-    )
+
+    # Prefer sample bundle when requested, else try full PTB-XL and fall back.
+    use_sample = bool(getattr(config, "sample_only", False))
+
+    if use_sample:
+        X, y, meta = load_ptbxl_sample(
+            sample_dir=config.sample_dir,
+            ptb_path=None,
+            sample_only=True,  # force sample-mode
+        )
+    else:
+        try:
+            X, y, meta = load_ptbxl_full(
+                data_dir=config.data_dir,
+                sample_dir=config.sample_dir,
+                sampling_rate=config.sampling_rate,
+                subsample_frac=config.subsample_frac,
+            )
+        except FileNotFoundError:
+            # Graceful fallback so hiring managers can run without the 5GB dataset.
+            print("PTB-XL not found; falling back to bundled sample CSVs.")
+            X, y, meta = load_ptbxl_sample(
+                sample_dir=config.sample_dir,
+                ptb_path=None,
+                sample_only=True,
+            )
+
+    # print("Loading data for evaluation...")
+    # X, y, meta = load_ptbxl_full(
+    #     data_dir=PTBXL_DATA_DIR,
+    #     subsample_frac=config.subsample_frac,
+    #     sampling_rate=config.sampling_rate,
+    # )
 
     # Filter unknown labels
     keep = np.array([lbl != "Unknown" for lbl in y], dtype=bool)
