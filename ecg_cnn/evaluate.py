@@ -52,7 +52,11 @@ from torch.utils.data import TensorDataset, DataLoader
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from ecg_cnn.config.config_loader import load_training_config, TrainConfig
-from ecg_cnn.data.data_utils import load_ptbxl_full, load_ptbxl_sample, FIVE_SUPERCLASSES
+from ecg_cnn.data.data_utils import (
+    load_ptbxl_full,
+    load_ptbxl_sample,
+    FIVE_SUPERCLASSES,
+)
 from ecg_cnn.models import MODEL_CLASSES
 from ecg_cnn.paths import (
     ARTIFACTS_DIR,
@@ -577,7 +581,7 @@ def main(
         try:
             X, y, meta = load_ptbxl_full(
                 data_dir=config.data_dir,
-                sample_dir=config.sample_dir,
+                # sample_dir=config.sample_dir,
                 sampling_rate=config.sampling_rate,
                 subsample_frac=config.subsample_frac,
             )

@@ -683,6 +683,20 @@ def test_main_runs(
     mock_config.return_value.tag = "dummy"
     mock_config.return_value.fold = 0
 
+    # Raw config dict returned by load_training_config
+    mock_loader.return_value.update(
+        {
+            "sample_only": False,
+            "data_dir": None,
+            "sample_dir": None,
+        }
+    )
+
+    # TrainConfig(...) instance fields consumed by evaluate.main
+    mock_config.return_value.sample_only = False
+    mock_config.return_value.data_dir = None
+    mock_config.return_value.sample_dir = None
+
     # Fake model that returns logits with forced class distribution
     def fake_forward(x):
         num_classes = 5
@@ -1008,6 +1022,8 @@ def test_main_raises_when_summary_lacks_model_path_triggers_value_error(
         tag="dummy",
         subsample_frac=1.0,
         sampling_rate=100,
+        data_dir=None,
+        sample_dir=None,
     )
 
     # Summary entry missing 'model_path' (so best.get('model_path','') == "")
@@ -1074,6 +1090,8 @@ def test_main_raises_when_checkpoint_missing(
         tag="dummy",
         subsample_frac=1.0,
         sampling_rate=100,
+        data_dir=None,
+        sample_dir=None,
     )
 
     # Summary points to a non-existent weights file
@@ -1083,7 +1101,7 @@ def test_main_raises_when_checkpoint_missing(
     )
 
     with pytest.raises(
-        FileNotFoundError, match=r"Model weights not found: .*missing_weights\.pt"
+        FileNotFoundError, match=r"^Model weights not found: .*missing_weights\.pt"
     ):
         evaluate.main(fold_override=0)
 
@@ -1107,6 +1125,8 @@ def test_main_raises_when_unknown_model(
         tag="dummy",
         subsample_frac=1.0,
         sampling_rate=100,
+        data_dir=None,
+        sample_dir=None,
     )
 
     # Create a valid summary AND a touched checkpoint so earlier checks pass
@@ -1199,6 +1219,8 @@ def test_main_uses_parsed_args_namespace(monkeypatch, tmp_path):
                 sampling_rate=100,
                 lr=0.001,
                 weight_decay=0.0,
+                data_dir=None,
+                sample_dir=None,
             ),
             {"tag": "t11", "fold": 1},
         ),
@@ -1229,6 +1251,8 @@ def test_main_uses_parsed_args_namespace(monkeypatch, tmp_path):
         shap_n=None,
         shap_bg=None,
         shap_stride=None,
+        data_dir=None,
+        sample_dir=None,
     )
 
     # Execute: if parse_evaluate_args() is called, we raise above
@@ -1254,6 +1278,8 @@ def test_main_cli_path_calls_parse_evaluate_args(monkeypatch, tmp_path):
             shap_n=None,
             shap_bg=None,
             shap_stride=None,
+            data_dir=None,
+            sample_dir=None,
         )
 
     monkeypatch.setattr(evaluate, "parse_evaluate_args", _fake_parse, raising=False)
@@ -1314,6 +1340,8 @@ def test_main_cli_path_calls_parse_evaluate_args(monkeypatch, tmp_path):
                 sampling_rate=100,
                 lr=0.001,
                 weight_decay=0.0,
+                data_dir=None,
+                sample_dir=None,
             ),
             {"tag": "t", "fold": 1},
         ),
@@ -1843,6 +1871,8 @@ def test_main_prefer_bestjson_prints_selection(
                 sampling_rate=100,
                 lr=1e-3,
                 weight_decay=0.0,
+                data_dir=None,
+                sample_dir=None,
             ),
             {"tag": "t", "fold": 1},
         ),
@@ -1933,6 +1963,8 @@ def test_main_fold_id_pulled_from_ckpt_filename(monkeypatch, tmp_path):
                 sampling_rate=100,
                 lr=1e-3,
                 weight_decay=0.0,
+                data_dir=None,
+                sample_dir=None,
             ),
             {"tag": "t", "fold": None},
         ),
@@ -2037,6 +2069,8 @@ def test_main_fold_id_defaults_to_one_when_unknown(monkeypatch, tmp_path):
                 sampling_rate=100,
                 lr=1e-3,
                 weight_decay=0.0,
+                data_dir=None,
+                sample_dir=None,
             ),
             {"tag": "t", "fold": None},
         ),
@@ -2163,6 +2197,8 @@ def test_prefer_latest_picks_newest_checkpoint(monkeypatch, tmp_path):
                 sampling_rate=100,
                 lr=1e-3,
                 weight_decay=0.0,
+                data_dir=None,
+                sample_dir=None,
             ),
             {"tag": "t", "fold": 1},
         ),
@@ -2212,6 +2248,212 @@ def test_prefer_latest_picks_newest_checkpoint(monkeypatch, tmp_path):
     # Assert newest was chosen
     assert loaded["path"] == str(newer)
     # You can also assert the printed cue: "[prefer=latest] Using newest checkpoint: model_best_...fold2.pth"
+
+
+def test_main_uses_sample_branch_when_sample_only_true(monkeypatch, tmp_path, capsys):
+    """
+    Covers evaluate.py:571–575 (sample-only path).
+    Forces sample_only=True and confirms load_ptbxl_sample is called.
+    """
+    # Send all outputs to tmp
+    for name in (
+        "RESULTS_DIR",
+        "HISTORY_DIR",
+        "PLOTS_DIR",
+        "MODELS_DIR",
+        "ARTIFACTS_DIR",
+        "REPORTS_DIR",
+    ):
+        monkeypatch.setattr(evaluate, name, tmp_path, raising=False)
+
+    # Minimal config file + loader
+    cfg_path = tmp_path / "config_dummy.yaml"
+    cfg_path.write_text("dummy: true")
+    monkeypatch.setattr(evaluate, "_latest_config_path", lambda: cfg_path)
+
+    cfg = SimpleNamespace(
+        model="ECGResNet",
+        batch_size=2,
+        lr=0.0,
+        weight_decay=0.0,
+        subsample_frac=1.0,
+        sampling_rate=100,
+        sample_only=True,  # <- force sample branch
+        data_dir=None,
+        sample_dir=None,
+    )
+    extras = {"tag": "t", "fold": 0, "config": str(cfg_path)}
+    monkeypatch.setattr(evaluate, "_load_config_and_extras", lambda *_: (cfg, extras))
+
+    # Summary & ckpt so restore is satisfied
+    ckpt = tmp_path / "ckpt.pt"
+    ckpt.write_text("")
+    monkeypatch.setattr(
+        evaluate,
+        "_read_summary",
+        lambda tag: [
+            {"fold": 0, "loss": 0.1, "model_path": str(ckpt), "best_epoch": 0}
+        ],
+        raising=False,
+    )
+    monkeypatch.setattr(
+        evaluate,
+        "_select_best_entry",
+        lambda s, fold_override=None: s[0],
+        raising=False,
+    )
+    monkeypatch.setattr("torch.load", lambda *a, **k: {}, raising=False)
+
+    # Tiny dataset returned by the SAMPLE loader (flag it so we can assert)
+    X = np.random.randn(4, 12, 32).astype("float32")
+    y = np.array(["NORM", "MI", "STTC", "CD"])
+    meta = pd.DataFrame({"i": range(4)})
+    called = {"sample": False}
+
+    def _sample_loader(**kwargs):
+        called["sample"] = True
+        return X, y, meta
+
+    monkeypatch.setattr(evaluate, "load_ptbxl_sample", _sample_loader, raising=False)
+
+    # Use your existing _TinyLogitModel in BOTH registries
+    monkeypatch.setattr(
+        evaluate,
+        "MODEL_CLASSES",
+        {"ECGResNet": lambda num_classes, **kw: _TinyLogitModel(num_classes)},
+        raising=False,
+    )
+    monkeypatch.setattr(
+        models,
+        "MODEL_CLASSES",
+        {"ECGResNet": lambda num_classes, **kw: _TinyLogitModel(num_classes)},
+        raising=False,
+    )
+
+    # No-op heavy helpers
+    for name in (
+        "evaluate_and_plot",
+        "save_threshold_sweep_table",
+        "save_roc_curve_multiclass_ovr",
+        "save_pr_curve_multiclass_ovr",
+        "save_classification_report",
+        "save_confidence_histogram_split",
+        "save_plot_curves",
+        "shap_compute_values",
+        "_shap_stability_report",
+        "shap_save_channel_summary",
+    ):
+        monkeypatch.setattr(evaluate, name, lambda *a, **k: None, raising=False)
+
+    # Run (SHAP off keeps it light)
+    evaluate.main(shap_profile="off")
+    assert called["sample"] is True
+
+
+def test_main_falls_back_to_sample_when_full_not_found(monkeypatch, tmp_path, capsys):
+    """
+    Covers evaluate.py:584–587 (FileNotFoundError fallback).
+    Makes full loader raise; asserts fallback message and sample loader call.
+    """
+    # Send all outputs to tmp
+    for name in (
+        "RESULTS_DIR",
+        "HISTORY_DIR",
+        "PLOTS_DIR",
+        "MODELS_DIR",
+        "ARTIFACTS_DIR",
+        "REPORTS_DIR",
+    ):
+        monkeypatch.setattr(evaluate, name, tmp_path, raising=False)
+
+    # Minimal config file + loader
+    cfg_path = tmp_path / "config_dummy.yaml"
+    cfg_path.write_text("dummy: true")
+    monkeypatch.setattr(evaluate, "_latest_config_path", lambda: cfg_path)
+
+    cfg = SimpleNamespace(
+        model="ECGResNet",
+        batch_size=2,
+        lr=0.0,
+        weight_decay=0.0,
+        subsample_frac=1.0,
+        sampling_rate=100,
+        sample_only=False,  # <- full path first
+        data_dir=None,
+        sample_dir=None,
+    )
+    extras = {"tag": "t", "fold": 0, "config": str(cfg_path)}
+    monkeypatch.setattr(evaluate, "_load_config_and_extras", lambda *_: (cfg, extras))
+
+    # Summary & ckpt so restore is satisfied
+    ckpt = tmp_path / "ckpt.pt"
+    ckpt.write_text("")
+    monkeypatch.setattr(
+        evaluate,
+        "_read_summary",
+        lambda tag: [
+            {"fold": 0, "loss": 0.1, "model_path": str(ckpt), "best_epoch": 0}
+        ],
+        raising=False,
+    )
+    monkeypatch.setattr(
+        evaluate,
+        "_select_best_entry",
+        lambda s, fold_override=None: s[0],
+        raising=False,
+    )
+    monkeypatch.setattr("torch.load", lambda *a, **k: {}, raising=False)
+
+    # Make FULL loader fail; SAMPLE loader succeed (and flag)
+    def _full_loader(**kwargs):
+        raise FileNotFoundError("pretend PTB-XL not present")
+
+    called = {"sample": False}
+    X = np.random.randn(4, 12, 32).astype("float32")
+    y = np.array(["NORM", "MI", "STTC", "CD"])
+    meta = pd.DataFrame({"i": range(4)})
+
+    monkeypatch.setattr(evaluate, "load_ptbxl_full", _full_loader, raising=False)
+    monkeypatch.setattr(
+        evaluate,
+        "load_ptbxl_sample",
+        lambda **k: (called.update(sample=True) or (X, y, meta)),
+        raising=False,
+    )
+
+    # Use your existing _TinyLogitModel in BOTH registries
+    monkeypatch.setattr(
+        evaluate,
+        "MODEL_CLASSES",
+        {"ECGResNet": lambda num_classes, **kw: _TinyLogitModel(num_classes)},
+        raising=False,
+    )
+    monkeypatch.setattr(
+        models,
+        "MODEL_CLASSES",
+        {"ECGResNet": lambda num_classes, **kw: _TinyLogitModel(num_classes)},
+        raising=False,
+    )
+
+    # No-op heavy helpers
+    for name in (
+        "evaluate_and_plot",
+        "save_threshold_sweep_table",
+        "save_roc_curve_multiclass_ovr",
+        "save_pr_curve_multiclass_ovr",
+        "save_classification_report",
+        "save_confidence_histogram_split",
+        "save_plot_curves",
+        "shap_compute_values",
+        "_shap_stability_report",
+        "shap_save_channel_summary",
+    ):
+        monkeypatch.setattr(evaluate, name, lambda *a, **k: None, raising=False)
+
+    evaluate.main(shap_profile="off")
+    out = capsys.readouterr().out
+    assert "falling back to bundled sample CSVs" in out
+    assert called["sample"] is True
 
 
 # ------------------------------------------------------------------------------
@@ -2611,7 +2853,7 @@ def test_shap_stability_report_shape_mismatch_raises():
 
 
 def test_shap_stability_report_rejects_non_tensor_or_array():
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match=r"^sv must be np.ndarray or torch.Tensor"):
         evaluate._shap_stability_report("not an array")
 
 
@@ -2747,6 +2989,8 @@ def test_eval_shap_custom_profile_parses_ints(monkeypatch, tmp_path):
             sample_only=False,
             subsample_frac=1.0,
             sampling_rate=100,
+            data_dir=None,
+            sample_dir=None,
         )
         extras = {"tag": "t", "fold": 1, "config": str(path)}
         return cfg, extras
@@ -2796,8 +3040,13 @@ def test_eval_shap_custom_profile_parses_ints(monkeypatch, tmp_path):
         def reset_index(self, drop=False):
             return self
 
-    def _fake_load_ptbxl_full(data_dir=None, subsample_frac=1.0, sampling_rate=100):
-        # N=12, C=12, T=100 to match the small tensor above; ensure two classes
+    def _fake_load_ptbxl_full(
+        data_dir=None,
+        sample_dir=None,
+        sampling_rate=None,
+        subsample_frac=None,
+        **_,
+    ):
         X = torch.ones((12, 12, 100)).numpy()
         y = ["NORM"] * 6 + ["MI"] * 6
         meta = _DummyMeta(12)
@@ -2906,6 +3155,8 @@ def test_eval_shap_profile_falls_back_to_medium(monkeypatch, tmp_path, capsys):
         sampling_rate=100,
         lr=0.001,
         weight_decay=0.0,
+        data_dir=None,
+        sample_dir=None,
     )
     evaluate.tag = "t"
     evaluate.best_fold = 1
@@ -2920,15 +3171,16 @@ def test_eval_shap_profile_falls_back_to_medium(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(
         evaluate,
         "_load_config_and_extras",
-        # RETURN CONFIG WITH THE SAME TWO FIELDS:
         lambda path, fold_override: (
             SimpleNamespace(
                 model="ECGResNet",
                 batch_size=2,
                 subsample_frac=1.0,
                 sampling_rate=100,
-                lr=0.001,  # <-- add
-                weight_decay=0.0,  # <-- add
+                lr=0.001,
+                weight_decay=0.0,
+                data_dir=None,
+                sample_dir=None,
             ),
             {"tag": "t", "fold": 1},
         ),
@@ -3023,6 +3275,8 @@ def test_eval_shap_prints_no_batches_when_dataset_empty(monkeypatch, tmp_path, c
         sampling_rate=100,
         lr=0.001,
         weight_decay=0.0,
+        data_dir=None,
+        sample_dir=None,
     )
     evaluate.tag = "t"
     evaluate.best_fold = 1
@@ -3045,6 +3299,8 @@ def test_eval_shap_prints_no_batches_when_dataset_empty(monkeypatch, tmp_path, c
                 sampling_rate=100,
                 lr=0.001,
                 weight_decay=0.0,
+                data_dir=None,
+                sample_dir=None,
             ),
             {"tag": "t", "fold": 1},
         ),
@@ -3145,6 +3401,8 @@ def test_main_shap_off_prints_disabled_fast(patch_paths, monkeypatch, capsys):
             "tag": "dummy",
             "fold": 0,
             "config": "config_dummy.yaml",
+            "data_dir": None,
+            "sample_dir": None,
         }
 
     monkeypatch.setattr(evaluate, "load_training_config", _fake_load_training_config)
@@ -3245,7 +3503,7 @@ def test_main_shap_off_prints_disabled_fast(patch_paths, monkeypatch, capsys):
 
 def test_main_calls_cuda_synchronize(monkeypatch, tmp_path, capsys):
     """
-    Covers line 701: if torch.cuda.is_available(): torch.cuda.synchronize()
+    If torch.cuda.is_available(): torch.cuda.synchronize()
     Fast path: redirect RESULTS_DIR, stub data to tiny arrays, and no-op heavy helpers.
     """
 
@@ -3262,7 +3520,6 @@ def test_main_calls_cuda_synchronize(monkeypatch, tmp_path, capsys):
     fake_cfg.write_text("model: ECGConvNet\n")
     monkeypatch.setattr(evaluate, "_latest_config_path", lambda: fake_cfg)
 
-    # --- Return minimal (config, extras) so main() proceeds
     def _fake_load_config_and_extras(path, fold_override=None):
         cfg = SimpleNamespace(
             model="ECGConvNet",
@@ -3271,6 +3528,8 @@ def test_main_calls_cuda_synchronize(monkeypatch, tmp_path, capsys):
             sampling_rate=100,
             lr=0.0,
             weight_decay=0.0,
+            data_dir=None,  # required by main(); ok to be None
+            sample_dir=None,  # required by main(); ok to be None
         )
         extras = {
             "tag": "dummy",

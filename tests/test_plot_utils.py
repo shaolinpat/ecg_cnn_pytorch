@@ -1992,51 +1992,6 @@ def test_save_confidence_histogram_split_rejects_bad_out_folder() -> None:
         )
 
 
-# def test_save_threshold_sweep_table_binary(tmp_path):
-#     y_true = [0, 1, 0, 1]
-#     y_probs = [0.1, 0.9, 0.2, 0.8]
-#     csv_p = save_threshold_sweep_table(
-#         y_true, y_probs, tmp_path, "ECGConvNet", 0.001, 64, 0.0005, "final"
-#     )
-#     assert csv_p.exists()
-#     import pandas as pd
-#     df = pd.read_csv(csv_p)
-#     assert set(["threshold", "precision", "recall", "f1", "accuracy"]).issubset(df.columns)
-
-# def test_save_confidence_histogram(tmp_path):
-#     y_probs = [0.1, 0.2, 0.8, 0.9]
-#     p = save_confidence_histogram(
-#         y_probs, tmp_path, "ECGConvNet", 0.001, 64, 0.0005, "final"
-#     )
-#     assert p.exists()
-
-# def test_save_det_curve_binary(tmp_path):
-#     y_true = [0, 1, 0, 1, 1, 0, 0, 1]
-#     y_probs = [0.2, 0.9, 0.3, 0.8, 0.7, 0.1, 0.4, 0.6]
-#     p = save_det_curve(
-#         y_true, y_probs, tmp_path, "ECGConvNet", 0.001, 64, 0.0005, "final"
-#     )
-#     assert p is not None and p.exists()
-
-# def test_save_lift_gain_curves_binary(tmp_path):
-#     y_true = [0, 1, 0, 1, 1, 0, 0, 1]
-#     y_probs = [0.2, 0.9, 0.3, 0.8, 0.7, 0.1, 0.4, 0.6]
-#     gain_p, lift_p = save_lift_gain_curves(
-#         y_true, y_probs, tmp_path, "ECGConvNet", 0.001, 64, 0.0005, "final"
-#     )
-#     assert gain_p is not None and gain_p.exists()
-#     assert lift_p is not None and lift_p.exists()
-
-# def test_save_error_tables_binary(tmp_path):
-#     y_true = [0, 1, 0, 1, 1, 0, 0, 1]
-#     y_probs = [0.2, 0.9, 0.3, 0.8, 0.51, 0.49, 0.52, 0.48]
-#     fn_p, fp_p = save_error_tables(
-#         y_true, y_probs, tmp_path, "ECGConvNet", 0.001, 64, 0.0005, "final", threshold=0.5, top_k=3
-#     )
-#     assert fn_p is not None and fn_p.exists()
-#     assert fp_p is not None and fp_p.exists()
-
-
 # ------------------------------------------------------------------------------
 # evaluate_and_plot (integration-style)
 # ------------------------------------------------------------------------------
@@ -2806,9 +2761,9 @@ def test_shap_background_limits_and_validates():
     X2 = _rand(8, 1, 64)
     bg2 = shap_sample_background(X2, max_background=16, seed=22)
     assert bg2.shape == (8, 1, 64)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=r"^data must have shape \(N, C, T\)"):
         shap_sample_background(torch.randn(8, 64), max_background=4)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=r"^max_background must be >=1"):
         shap_sample_background(X, max_background=0)
 
 
@@ -2844,11 +2799,11 @@ def test_shap_save_channel_summary_writes_file(tmp_path: Path):
 
 
 def test_shap_save_channel_summary_validates(tmp_path: Path):
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=r"^shap_values must have shape \(N, C, T\)"):
         shap_save_channel_summary(
             np.zeros((8, 2)), np.zeros((8, 2, 64)), tmp_path, "a.png"
         )
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=r"^X must have shape \(N, C, T\)"):
         shap_save_channel_summary(
             np.zeros((8, 2, 64)), np.zeros((8, 2)), tmp_path, "b.png"
         )
@@ -2885,17 +2840,17 @@ def test_validate_array_3d_happy_path():
 
 
 def test_validate_array_3d_wrong_type():
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match=r"^x must be np.ndarray or torch.Tensor"):
         _validate_array_3d("x", 123)  # not ndarray/tensor
 
 
 def test_validate_array_3d_wrong_ndim():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=r"^x must have shape \(N, C, T\)"):
         _validate_array_3d("x", np.zeros((2, 3)))  # 2D, not 3D
 
 
 def test_validate_array_3d_nonpositive_dim():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=r"^x must have positive dimensions"):
         _validate_array_3d("x", np.zeros((1, 0, 4)))
 
 
@@ -2914,7 +2869,7 @@ def test_to_tensor_from_numpy_and_passthrough():
 
 
 def test_to_tensor_type_error():
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match=r"^x must be np.ndarray or torch.Tensor"):
         _to_tensor("bad", "x")
 
 
@@ -2933,7 +2888,7 @@ def test_to_numpy_from_tensor_and_passthrough():
 
 
 def test_to_numpy_type_error():
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match=r"^x must be np.ndarray or torch.Tensor"):
         _to_numpy(object(), "x")
 
 
@@ -2999,7 +2954,9 @@ def test_shap_compute_values_multiclass_shapes_list():
 
 def test_shap_save_channel_summary_raises_on_empty_list(tmp_path: Path):
     X = np.random.randn(4, 2, 16).astype(np.float32)
-    with pytest.raises(ValueError):
+    with pytest.raises(
+        ValueError, match=r"^Empty shap_values list for multiclass case."
+    ):
         shap_save_channel_summary([], X, tmp_path, "empty.png")
 
 
@@ -3007,7 +2964,7 @@ def test_shap_save_channel_summary_validates_shape(tmp_path: Path):
     # C == 0 triggers validation error
     sv = np.zeros((5, 0, 10), dtype=np.float32)
     X = np.zeros((5, 0, 10), dtype=np.float32)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=r"^shap_values must have positive dimensions"):
         shap_save_channel_summary(sv, X, tmp_path, "bad.png")
 
 
@@ -3082,7 +3039,9 @@ def test_shap_compute_values_raises_when_model_has_no_params_and_no_device():
     X = np.zeros((1, 1, 8), dtype=np.float32)
     bg = np.zeros((1, 1, 8), dtype=np.float32)
 
-    with pytest.raises(ValueError) as ei:
+    with pytest.raises(
+        ValueError, match=r"^model has no parameters; cannot infer device or run SHAP"
+    ) as ei:
         shap_compute_values(_NoParamModel(), X, bg, device=None)
 
     msg = str(ei.value)
@@ -3105,7 +3064,9 @@ def test_shap_compute_values_invalid_logits_shape_raises():
     X = np.zeros((2, 1, 4), dtype=np.float32)
     bg = np.zeros((1, 1, 4), dtype=np.float32)
 
-    with pytest.raises(ValueError) as ei:
+    with pytest.raises(
+        ValueError, match=r"^Expected model logits of shape \(N,K\) or \(N,\)"
+    ) as ei:
         shap_compute_values(_BadShapeModel(), X, bg, device=torch.device("cpu"))
     assert "Expected model logits" in str(ei.value)
 
@@ -3221,7 +3182,10 @@ def test_shap_compute_values_tf_import_then_gradient_fails_raises_runtime(monkey
 
     X = np.zeros((1, 1, 4), dtype=np.float32)
     bg = np.zeros((1, 1, 4), dtype=np.float32)
-    with pytest.raises(RuntimeError) as ei:
+    with pytest.raises(
+        RuntimeError,
+        match=r"^SHAP DeepExplainer failed: No module named \'tensorflow\'",
+    ) as ei:
         shap_compute_values(_TinyModel(), X, bg, device=torch.device("cpu"))
     msg = str(ei.value)
     assert "SHAP DeepExplainer failed:" in msg
@@ -3250,7 +3214,10 @@ def test_shap_compute_values_deep_fails_non_tf_raises_runtime(monkeypatch):
 
     X = np.zeros((1, 1, 4), dtype=np.float32)
     bg = np.zeros((1, 1, 4), dtype=np.float32)
-    with pytest.raises(RuntimeError) as ei:
+    with pytest.raises(
+        RuntimeError,
+        match=r"^SHAP DeepExplainer failed: weird failure in deep explainer",
+    ) as ei:
         shap_compute_values(_TinyModel(), X, bg, device=torch.device("cpu"))
     assert "SHAP DeepExplainer failed:" in str(ei.value)
 
@@ -3264,19 +3231,23 @@ def test_save_classification_report_csv_raises_on_non_positive_fold_id(tmp_path)
     # Minimal valid y arrays
     y_true = [0, 1]
     y_pred = [0, 1]
-    with pytest.raises(ValueError) as ei:
+    with pytest.raises(ValueError, match=r"^fold_id must be a positive integer") as ei:
         save_classification_report_csv(y_true, y_pred, tmp_path, "t", 0)
     assert "fold_id must be a positive integer" in str(ei.value)
 
 
 def test_save_cr_raises_on_empty_or_mismatch_vectors(tmp_path):
     # Empty
-    with pytest.raises(ValueError) as ei1:
+    with pytest.raises(
+        ValueError, match=r"^y_true and y_pred must be same non-zero length"
+    ) as ei1:
         save_classification_report_csv([], [], tmp_path, "t", 1)
     assert "y_true and y_pred must be same non-zero length" in str(ei1.value)
 
     # Mismatch
-    with pytest.raises(ValueError) as ei2:
+    with pytest.raises(
+        ValueError, match=r"^y_true and y_pred must be same non-zero length"
+    ) as ei2:
         save_classification_report_csv([0, 1], [0], tmp_path, "t", 1)
     assert "y_true and y_pred must be same non-zero length" in str(ei2.value)
 

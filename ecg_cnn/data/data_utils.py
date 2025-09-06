@@ -457,8 +457,21 @@ def load_ptbxl_sample(sample_dir, ptb_path, sample_only: bool = False):
     if not sample_dir.is_dir():
         raise NotADirectoryError(f"Input not a directory: {sample_dir}")
 
-    # If PTB-XL root is missing, FALL BACK to loading the bundled sample CSVs
+    # Detect "sample mode" strictly from the contents of sample_dir:
+    # - if sample_ids.csv exists, or
+    # - if there are any *.csv files
+    # In that case we do NOT require the full PTB-XL directory to exist.
+    entries = list(sample_dir.iterdir())
+    has_sample_ids = any(p.name == "sample_ids.csv" for p in entries)
+    has_any_csv = any(p.suffix.lower() == ".csv" for p in entries)
+    sample_mode = has_sample_ids or has_any_csv
+
+    # If PTB-XL root is missing:
+    # - in sample mode (or sample_only), do the minimal CSV fallback loader
+    # - otherwise (not sample mode), raise NotADirectoryError
     if not ptb_path.is_dir():
+        if not sample_mode:
+            raise NotADirectoryError(f"Input not a directory: {ptb_path}")
         # Minimal sample-mode loader: read CSVs in sample_dir and fabricate labels
         csvs = sorted([p for p in Path(sample_dir).glob("*.csv") if p.is_file()])
         if not csvs:
@@ -492,7 +505,7 @@ def load_ptbxl_sample(sample_dir, ptb_path, sample_only: bool = False):
 
         if not X_list:
             raise ValueError(f"No valid 12-lead CSVs found in {sample_dir}")
-        
+
         X = np.stack(X_list, axis=0).astype(np.float32)  # (N, 12, T)
 
         # Map fabricated string labels -> integers
@@ -500,7 +513,7 @@ def load_ptbxl_sample(sample_dir, ptb_path, sample_only: bool = False):
         y_int = np.array([label_to_id[lab] for lab in y_list], dtype=np.int64)
 
         # Ensure all 5 classes are represented at least once
-        if len(set(y_int)) < len(label_cycle):
+        if len(set(y_int)) < len(label_cycle) and len(y_int) > 0:
             # Round-robin assign extra labels to the first few samples
             for j in range(len(label_cycle)):
                 if j not in y_int:
@@ -508,19 +521,6 @@ def load_ptbxl_sample(sample_dir, ptb_path, sample_only: bool = False):
 
         sample_meta = pd.DataFrame({"ecg_id": ids, "diagnostic_superclass": y_list})
         return X, y_int, sample_meta
-
-    # Detect "sample mode" strictly from the contents of sample_dir:
-    # - if sample_ids.csv exists, or
-    # - if there are any *.csv files
-    # In that case we do NOT require the full PTB-XL directory to exist.
-    entries = list(sample_dir.iterdir())
-    has_sample_ids = any(p.name == "sample_ids.csv" for p in entries)
-    has_any_csv = any(p.suffix.lower() == ".csv" for p in entries)
-    sample_mode = has_sample_ids or has_any_csv
-
-    # Only enforce PTB-XL directory in non-sample mode
-    if not sample_mode and not ptb_path.is_dir():
-        raise NotADirectoryError(f"Input not a directory: {ptb_path}")
 
     # 1) Check if there's a "sample_ids.csv" in sample_dir:
     list_of_files = [p.name for p in entries]
@@ -556,12 +556,17 @@ def load_ptbxl_sample(sample_dir, ptb_path, sample_only: bool = False):
             }
         ).set_index("ecg_id")
 
+    # If NOT sample mode and no IDs came from sample_dir, derive a few from PTB meta
+    # so the WFDB path below is reachable (kept small to stay fast).
+    if not sample_mode and not ecg_ids:
+        ecg_ids = list(full_meta_df.index[:8])
+
     # 3) Subset to only those ecg_ids
     sample_meta = full_meta_df.loc[ecg_ids].copy()
 
     X_list, y_list = [], []
 
-    label_cycle = ["CD", "HYP", "MI", "NORM", "STTC"]  
+    label_cycle = ["CD", "HYP", "MI", "NORM", "STTC"]
 
     for i, (ecg_id, row) in enumerate(sample_meta.iterrows()):
         if sample_mode:
@@ -582,7 +587,6 @@ def load_ptbxl_sample(sample_dir, ptb_path, sample_only: bool = False):
     X = np.stack(X_list, axis=0).astype(np.float32)
 
     # Map labels (strings) to integer IDs for the trainer; keep human labels in meta
-    label_cycle = ["CD", "HYP", "MI", "NORM", "STTC"]
     to_id = {lab: i for i, lab in enumerate(label_cycle)}
     y_int = np.array([to_id.get(lbl, to_id["NORM"]) for lbl in y_list], dtype=np.int64)
 
@@ -593,7 +597,12 @@ def load_ptbxl_sample(sample_dir, ptb_path, sample_only: bool = False):
     return X, y_int, sample_meta
 
 
-def load_ptbxl_full(data_dir, subsample_frac, sampling_rate=100):
+def load_ptbxl_full(
+    data_dir,
+    subsample_frac,
+    sampling_rate=100,
+    **_,
+):
     """
     Load all PTB-XL ECG records from the given directory, with optional subsampling.
 
@@ -645,9 +654,14 @@ def load_ptbxl_full(data_dir, subsample_frac, sampling_rate=100):
     """
 
     # Normalize and validate inputs
+    if data_dir is None:
+        # let evaluate.main catch this and fallback to sample CSVs
+        raise FileNotFoundError("PTB-XL data_dir missing: None")
+
     data_dir = Path(data_dir)
     if not data_dir.is_dir():
-        raise NotADirectoryError(f"Invalid data directory: {data_dir}")
+        # use FileNotFoundError so evaluate.py’s fallback path triggers
+        raise FileNotFoundError(f"PTB-XL data_dir missing: {data_dir}")
 
     if not (0.0 < subsample_frac <= 1.0):
         raise ValueError(f"subsample_frac must be in (0.0, 1.0], got {subsample_frac}")

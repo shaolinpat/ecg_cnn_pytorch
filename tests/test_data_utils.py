@@ -94,6 +94,12 @@ def create_dummy_scp_statements(path):
     df.to_csv(path / "scp_statements.csv")
 
 
+def _write_csv(path: Path, rows: int, cols: int):
+    """Write a numeric CSV with given shape (rows x cols), no header."""
+    lines = [",".join("0" for _ in range(cols)) for _ in range(rows)]
+    path.write_text("\n".join(lines) + "\n")
+
+
 # ------------------------------------------------------------------------------
 # def build_full_X_y(meta_csv, scp_csv, ptb_path):
 # ------------------------------------------------------------------------------
@@ -551,20 +557,22 @@ def test_load_ptbxl_sample_input_not_a_directory(tmp_path):
 
 
 def test_load_ptbxl_sample_ptb_path_not_a_directory(tmp_path):
-    bad_dir = tmp_path / "nonexistent" / "dir"
     sample_dir = tmp_path / "samples"
     sample_dir.mkdir(parents=True)
+    bad_dir = tmp_path / "does_not_exist"
     with pytest.raises(NotADirectoryError, match=r"^Input not a directory"):
-        load_ptbxl_sample(sample_dir, bad_dir)
+        load_ptbxl_sample(sample_dir=sample_dir, ptb_path=bad_dir)
 
 
 def test_load_ptbxl_sample_from_ids_csv(tmp_path):
-
     sample_dir = tmp_path / "samples"
-    sample_dir.mkdir(parents=True)
+    sample_dir.mkdir(parents=True, exist_ok=True)
+
     ecg_ids = [12345]
     pd.DataFrame({"ecg_id": ecg_ids}).to_csv(sample_dir / "sample_ids.csv", index=False)
-    (sample_dir / "12345_lr.csv").write_text("dummy")
+
+    csv_path = sample_dir / "12345_lr_100hz.csv"
+    csv_path.write_text("\n".join(",".join(["0"] * 12) for _ in range(1000)) + "\n")
 
     ptb_dir = tmp_path / "ptbxl"
     ptb_dir.mkdir(parents=True)
@@ -589,7 +597,6 @@ def test_load_ptbxl_sample_from_ids_csv(tmp_path):
         patch("ecg_cnn.data.data_utils.load_ptbxl_meta", return_value=dummy_meta),
         patch("wfdb.rdsamp", return_value=(np.zeros((1000, 12)), {})),
     ):
-
         X, y, meta = load_ptbxl_sample(sample_dir, ptb_dir)
 
     y = np.array(y)
@@ -602,7 +609,11 @@ def test_load_ptbxl_sample_from_filename_parsing(tmp_path):
     # Prepare sample directory with dummy files
     sample_dir = tmp_path / "samples"
     sample_dir.mkdir(parents=True)
-    (sample_dir / "00123_lr.csv").write_text("dummy")  # valid
+
+    # Must match the loader’s expected pattern and be numeric-only
+    csv_path = sample_dir / "00123_lr_100hz.csv"  # <-- was 00123_lr.csv
+    csv_path.write_text("\n".join(",".join(["0"] * 12) for _ in range(1000)) + "\n")
+
     (sample_dir / "ignore.txt").write_text("skip this")  # invalid
     (sample_dir / "badid_csv.csv").write_text("skip this too")  # malformed ID
 
@@ -629,7 +640,6 @@ def test_load_ptbxl_sample_from_filename_parsing(tmp_path):
         patch("ecg_cnn.data.data_utils.load_ptbxl_meta", return_value=dummy_meta),
         patch("wfdb.rdsamp", return_value=(np.zeros((1000, 12)), {})),
     ):
-
         X, y, meta = load_ptbxl_sample(sample_dir, ptb_path)
 
     y = np.array(y)
@@ -645,12 +655,8 @@ def test_load_ptbxl_sample_sample_dir_bad_type_triggers_typeerror():
 
 
 def test_load_ptbxl_sample_ptb_path_string_hits_second_if_and_then_notadir(tmp_path):
-    # Make sample_dir valid so we get past it
     sample_dir = tmp_path / "sample"
-    sample_dir.mkdir()
-    # ptb_path provided as STRING -> hits the SECOND if (Path(...))
-    # It doesn't exist, so after normalization we’ll hit NotADirectoryError,
-    # which is fine—coverage still executes the line we need.
+    sample_dir.mkdir(parents=True)
     with pytest.raises(NotADirectoryError, match=r"^Input not a directory"):
         load_ptbxl_sample(sample_dir=sample_dir, ptb_path=str(tmp_path / "ptb_dne"))
 
@@ -693,6 +699,238 @@ def test_load_ptbxl_sample_rejects_bad_ptb_path_type(tmp_path):
         load_ptbxl_sample(sample_dir=sample_dir, ptb_path=[])
 
 
+def test_load_ptbxl_sample_sample_only_triggers_fallback(tmp_path):
+    # Create minimal CSV with 12 columns so it looks like ECG
+    sample_dir = tmp_path / "samples"
+    sample_dir.mkdir()
+    csv_path = sample_dir / "00001_lr_100hz.csv"
+    csv_path.write_text("\n".join(",".join(["0"] * 12) for _ in range(5)))
+
+    # Call with sample_only=True forces line 452 path
+    X, y, meta = load_ptbxl_sample(
+        sample_dir=sample_dir, ptb_path=None, sample_only=True
+    )
+    assert X.shape[1] == 12
+    assert meta.shape[0] == X.shape[0]
+    assert y.dtype == np.int64
+
+
+def test_load_ptbxl_sample_fallback_loader_reads_csvs(tmp_path):
+    # Force ptb_path to be missing → triggers lines 467–510
+    sample_dir = tmp_path / "samples"
+    sample_dir.mkdir()
+    # Write two valid 12-lead CSVs
+    for i in range(2):
+        f = sample_dir / f"{i:05d}_lr_100hz.csv"
+        f.write_text("\n".join(",".join(["0"] * 12) for _ in range(5)))
+
+    X, y, meta = load_ptbxl_sample(sample_dir=sample_dir, ptb_path=tmp_path / "notadir")
+    assert X.shape[0] == 2
+    assert len(y) == 2
+    assert "diagnostic_superclass" in meta.columns
+
+
+def test_load_ptbxl_sample_raises_if_ptb_path_invalid_and_not_sample_mode(tmp_path):
+    sample_dir = tmp_path / "samples"
+    sample_dir.mkdir(parents=True)
+    with pytest.raises(NotADirectoryError, match=r"^Input not a directory"):
+        load_ptbxl_sample(sample_dir=sample_dir, ptb_path=tmp_path / "missing_dir")
+
+
+def test_load_ptbxl_sample_load_ptbxl_sample_reads_with_wfdb(monkeypatch, tmp_path):
+    # Hit lines 576–580 by providing fake PTB path + wfdb.rdsamp
+    sample_dir = tmp_path / "samples"
+    sample_dir.mkdir()
+    csv_path = sample_dir / "00001_lr_100hz.csv"
+    csv_path.write_text("\n".join(",".join(["0"] * 12) for _ in range(5)))
+
+    ptb_path = tmp_path / "ptbxl"
+    ptb_path.mkdir()
+
+    # Fake metadata with one entry
+    meta = pd.DataFrame(
+        {"ecg_id": [1], "filename_lr": ["00001_lr"], "scp_codes": [{"NORM": 1.0}]}
+    ).set_index("ecg_id")
+
+    # Patch load_ptbxl_meta and wfdb.rdsamp
+    from ecg_cnn import data as data_pkg
+
+    monkeypatch.setattr(
+        data_pkg.data_utils, "load_ptbxl_meta", lambda _: meta, raising=False
+    )
+    monkeypatch.setattr(
+        "wfdb.rdsamp", lambda path: (np.zeros((5, 12)), {}), raising=False
+    )
+    monkeypatch.setattr(
+        data_pkg.data_utils, "raw_to_five_class", lambda scp: "NORM", raising=False
+    )
+
+    X, y, meta_out = load_ptbxl_sample(sample_dir=sample_dir, ptb_path=ptb_path)
+    assert X.shape[1] == 12
+    assert y.shape[0] == 1
+    assert "diagnostic_superclass" in meta_out.columns
+
+
+def test_load_ptbxl_sample_fallback_loader_hits_elif_and_else_branches(tmp_path):
+    """
+    Covers 476–480:
+      - one file with shape (12, T) hits `elif arr.shape[0] == 12: pass`
+      - one file with shape (7, 9) hits `else: continue` (skipped)
+    """
+    sample_dir = tmp_path / "samples"
+    sample_dir.mkdir()
+
+    good = sample_dir / "00001_lr_100hz.csv"
+    bad = sample_dir / "00002_lr_100hz.csv"
+    _write_csv(good, rows=12, cols=5)  # (12, T) -> uses `elif` branch
+    _write_csv(bad, rows=7, cols=9)  # neither dimension 12 -> `continue`
+
+    # Force fallback mini-loader (ptb_path not a dir)
+    X, y, meta = load_ptbxl_sample(
+        sample_dir=sample_dir, ptb_path=tmp_path / "missing_dir"
+    )
+    assert X.shape[0] == 1  # bad one skipped
+    assert X.shape[1] == 12  # channel dimension preserved
+    assert len(y) == 1
+    assert meta.shape[0] == 1
+
+
+def test_load_ptbxl_sample_fallback_loader_bad_stem_triggers_id_fallback(tmp_path):
+    """
+    Covers 489–490: filename stem not int → except → ecg_id = i+1
+    """
+    sample_dir = tmp_path / "samples"
+    sample_dir.mkdir()
+    # non-numeric stem before first underscore
+    weird = sample_dir / "abc_lr_100hz.csv"
+    _write_csv(weird, rows=12, cols=5)
+
+    X, y, meta = load_ptbxl_sample(sample_dir=sample_dir, ptb_path=tmp_path / "nowhere")
+    # Expect ecg_id synthesized as 1 (i starts at 0)
+    assert int(meta["ecg_id"].iloc[0]) == 1
+
+
+def test_load_ptbxl_sample_fallback_loader_raises_when_no_valid_12lead_csvs(tmp_path):
+    """
+    Covers 494: all CSVs skipped -> X_list empty -> ValueError
+    """
+    sample_dir = tmp_path / "samples"
+    sample_dir.mkdir()
+    # Two files, neither with a 12-sized dimension
+    _write_csv(sample_dir / "00003_lr_100hz.csv", rows=5, cols=5)
+    _write_csv(sample_dir / "00004_lr_100hz.csv", rows=8, cols=10)
+
+    with pytest.raises(ValueError, match=r"No valid 12-lead CSVs"):
+        load_ptbxl_sample(sample_dir=sample_dir, ptb_path=tmp_path / "notadir")
+
+
+def test_load_ptbxl_sample_not_sample_mode_invalid_ptb_path_raises(tmp_path):
+    sample_dir = tmp_path / "samples"
+    sample_dir.mkdir(parents=True)  # empty → not sample mode
+    with pytest.raises(NotADirectoryError, match=r"^Input not a directory"):
+        load_ptbxl_sample(sample_dir=sample_dir, ptb_path=tmp_path / "missing_dir")
+
+
+def test_load_ptbxl_sample_synth_meta_when_load_meta_fails_in_sample_mode(
+    monkeypatch, tmp_path
+):
+    """
+    Covers 551: load_ptbxl_meta raises, sample_mode True -> synthesize meta DataFrame.
+    """
+    sample_dir = tmp_path / "samples"
+    sample_dir.mkdir()
+    # Provide sample_ids.csv to enter sample_mode branch
+    pd.DataFrame({"ecg_id": [123]}).to_csv(sample_dir / "sample_ids.csv", index=False)
+    # Also provide the per-ID CSV used later in sample_mode loop
+    id_csv = sample_dir / "00123_lr_100hz.csv"
+    _write_csv(id_csv, rows=12, cols=5)
+
+    # Make load_ptbxl_meta fail to force the except path
+    monkeypatch.setattr(
+        "ecg_cnn.data.data_utils.load_ptbxl_meta",
+        lambda *_: (_ for _ in ()).throw(RuntimeError("boom")),
+        raising=False,
+    )
+
+    # ptb_path can be anything; sample_mode True sidesteps the check
+    X, y, meta = load_ptbxl_sample(
+        sample_dir=sample_dir, ptb_path=tmp_path / "anything"
+    )
+    assert X.shape[0] == 1
+    assert "diagnostic_superclass" in meta.columns  # added later if missing
+
+
+def test_load_ptbxl_sample_wfdb_path_is_used_in_non_sample_mode(monkeypatch, tmp_path):
+    """
+    Covers 576–580: non-sample mode (no CSVs), valid ptb_path, use wfdb.rdsamp.
+    """
+    sample_dir = tmp_path / "samples"
+    sample_dir.mkdir()  # empty => not sample mode
+
+    ptb_path = tmp_path / "ptbxl"
+    ptb_path.mkdir()
+
+    # Fake metadata with one entry; filename_lr joined under ptb_path
+    meta = pd.DataFrame(
+        {"ecg_id": [1], "filename_lr": ["00001_lr"], "scp_codes": [{"NORM": 1.0}]}
+    ).set_index("ecg_id")
+
+    # Patch meta loader and wfdb.rdsamp, plus raw_to_five_class
+    monkeypatch.setattr(
+        "ecg_cnn.data.data_utils.load_ptbxl_meta", lambda *_: meta, raising=False
+    )
+    monkeypatch.setattr("wfdb.rdsamp", lambda p: (np.zeros((7, 12)), {}), raising=False)
+    monkeypatch.setattr(
+        "ecg_cnn.data.data_utils.raw_to_five_class", lambda scp: "NORM", raising=False
+    )
+
+    X, y, meta_out = load_ptbxl_sample(sample_dir=sample_dir, ptb_path=ptb_path)
+    assert X.shape == (1, 12, 7)  # (T,12) transposed to (12,T)
+    assert y.shape == (1,)
+    assert meta_out.shape[0] == 1
+
+
+def test_load_ptbxl_sample_fallback_raises_when_csv_suffix_but_no_files(tmp_path):
+    sample_dir = tmp_path / "samples"
+    sample_dir.mkdir()
+    # Create a directory with .csv suffix to trigger sample_mode=True
+    (sample_dir / "fake.csv").mkdir()
+    # Missing PTB dir forces fallback branch
+    with pytest.raises(FileNotFoundError, match=r"No CSVs found in sample_dir"):
+        load_ptbxl_sample(sample_dir=sample_dir, ptb_path=tmp_path / "missing_root")
+
+
+def test_load_ptbxl_sample_synthesize_meta_when_meta_load_fails_in_sample_mode(
+    monkeypatch, tmp_path
+):
+    sample_dir = tmp_path / "samples"
+    sample_dir.mkdir()
+    # sample_mode=True via sample_ids.csv
+    ecg_id = 123
+    pd.DataFrame({"ecg_id": [ecg_id]}).to_csv(
+        sample_dir / "sample_ids.csv", index=False
+    )
+    # per-ID signal CSV (12 cols, a few rows; comma-separated)
+    sig = "\n".join(",".join(["0"] * 12) for _ in range(5)) + "\n"
+    (sample_dir / f"{ecg_id:05d}_lr_100hz.csv").write_text(sig)
+
+    # ptb_path must exist so we hit try/except (not the earlier fallback/return)
+    ptb_path = tmp_path / "ptbxl"
+    ptb_path.mkdir()
+
+    # Force load_ptbxl_meta to fail -> triggers synth at line 761
+    monkeypatch.setattr(
+        "ecg_cnn.data.data_utils.load_ptbxl_meta",
+        lambda *_: (_ for _ in ()).throw(RuntimeError("boom")),
+        raising=False,
+    )
+
+    X, y, meta = load_ptbxl_sample(sample_dir=sample_dir, ptb_path=ptb_path)
+    assert X.shape[1] == 12 and X.shape[0] == 1
+    assert y.shape == (1,)
+    assert "diagnostic_superclass" in meta.columns
+
+
 # ------------------------------------------------------------------------------
 # def load_ptbxl_full(data_dir, subsample_frac, sampling_rate=100):
 # ------------------------------------------------------------------------------
@@ -700,7 +938,7 @@ def test_load_ptbxl_full_data_dir_not_a_directory(tmp_path):
     bad_dir = tmp_path / "nonexistent" / "dir"
     subsample_frac = 0.5
     sampling_rate = 100
-    with pytest.raises(NotADirectoryError, match=r"^Invalid data directory"):
+    with pytest.raises(FileNotFoundError, match=r"^PTB-XL data_dir missing:"):
         load_ptbxl_full(bad_dir, subsample_frac, sampling_rate)
 
 
@@ -916,6 +1154,15 @@ def test_load_ptbxl_full_handles_rdsamp_failure(mock_rdsamp, tmp_path):
     # Run function — it should raise an error due to all records failing
     with pytest.raises(ValueError, match=r"^No valid records were loaded\."):
         load_ptbxl_full(data_dir=str(data_dir), subsample_frac=1.0)
+
+
+def test_load_ptbxl_full_data_dir_none_raises():
+    with pytest.raises(FileNotFoundError, match=r"^PTB-XL data_dir missing: None"):
+        load_ptbxl_full(
+            data_dir=None,
+            subsample_frac=0.5,
+            sampling_rate=100,
+        )
 
 
 # ------------------------------------------------------------------------------

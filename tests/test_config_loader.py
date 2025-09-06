@@ -373,7 +373,7 @@ def test_load_yaml_as_dict_valid(tmp_path):
 
 
 def test_load_yaml_as_dict_file_not_found():
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(FileNotFoundError, match=r"^Config file not found"):
         load_yaml_as_dict(Path("nonexistent.yaml"))
 
 

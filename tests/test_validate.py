@@ -27,15 +27,7 @@ from ecg_cnn.utils.validate import (
 
 
 # ------------------------------------------------------------------------------
-# def validate_hparams_config(
-#     *,
-#     model: str,
-#     lr: float,
-#     bs: int,
-#     wd: float,
-#     n_epochs: int,
-#     n_folds: int,
-# ) -> None:
+# def validate_hparams_config()
 # ------------------------------------------------------------------------------
 
 
@@ -322,17 +314,7 @@ def test_validate_hparams_config_n_epochs_too_large():
 
 
 # ------------------------------------------------------------------------------
-# def validate_hparams_formatting(
-#     *,
-#     model: str,
-#     lr: float,
-#     bs: int,
-#     wd: float,
-#     prefix: str,
-#     fname_metric: str = "",
-#     epoch: int | None = None,
-#     fold: int | None = None,
-# ) -> None:
+# def validate_hparams_formatting()
 # ------------------------------------------------------------------------------
 
 
