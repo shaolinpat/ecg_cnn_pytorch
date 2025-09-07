@@ -1,3 +1,15 @@
 [run]
-omit =
-    **/ecg_cnn/utils/find_labels.py
+# Only measure your code, not site-packages
+source = ecg_cnn
+branch = True
+parallel = True
+
+[paths]
+# Unify different path spellings so coverage doesn’t treat them as separate files
+source =
+    ecg_cnn
+    /home/pbeach/Dropbox/VT-MIT/Projects/ecg_cnn_pytorch/ecg_cnn
+
+[report]
+show_missing = True
+skip_covered = True

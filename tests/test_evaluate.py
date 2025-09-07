@@ -895,11 +895,11 @@ def test_main_selects_best_fold_when_none_specified(
     # Use (N, C, L) like real ECG and multi-label y as lists
     mock_X = np.random.randn(5, 1, 1000).astype(np.float32)
     mock_y = [
-        ["0"],
-        ["1"],
-        ["2"],
-        ["3"],
-        ["4"],
+        "0",
+        "1",
+        "2",
+        "3",
+        "4",
     ]  # <- string labels to match target_names expectations
     mock_meta = pd.DataFrame({"dummy": range(5)})
 
@@ -2901,6 +2901,2175 @@ def test_eval_shap_prints_no_batches_message(capfd):
     assert "SHAP: no batches available to explain." in out
 
 
+# def test_eval_shap_custom_profile_parses_ints(monkeypatch, tmp_path):
+#     """
+#     Covers: custom SHAP profile with string inputs (shap_n, shap_bg, shap_stride)
+
+#     Ensures that string arguments are correctly parsed as integers, and passed
+#     into SHAP routines. This covers the `int(...)` conversion logic when
+#     shap_profile == "custom".
+
+#     Expected behavior:
+#         - shap_n = "12" --> 12
+#         - shap_bg = "6" --> 6
+#         - shap_stride = "3" --> 3
+#     """
+
+#     # Track values passed into SHAP save
+#     saved_params = {}
+
+#     def mock_sample_background(X, max_background, seed):
+#         out = torch.ones((max_background, X.shape[1], X.shape[2]))
+#         saved_params["bg"] = out.shape[0]
+#         return out
+
+#     monkeypatch.setattr(evaluate, "shap_sample_background", mock_sample_background)
+#     monkeypatch.setattr(
+#         evaluate,
+#         "shap_compute_values",
+#         lambda model, x, bg, device=None: torch.ones(
+#             (x.shape[0], x.shape[1], x.shape[2])
+#         ),
+#     )
+#     monkeypatch.setattr(
+#         evaluate,
+#         "_shap_stability_report",
+#         lambda sv, class_names=None: "mock report",
+#     )
+
+#     def fake_save(sv, X, outdir, fname):
+#         saved_params["n"] = X.shape[0]
+#         saved_params["stride"] = X.shape[2]
+#         return "mock_output.png"
+
+#     monkeypatch.setattr(evaluate, "shap_save_channel_summary", fake_save)
+
+#     # Prepare minimal context
+#     evaluate.model = MagicMock()
+#     evaluate.model.eval = lambda: None
+#     evaluate.device = torch.device("cpu")
+#     evaluate.dataset = TensorDataset(
+#         torch.ones((12, 12, 100)), torch.zeros(12, dtype=torch.long)
+#     )
+#     evaluate.config = SimpleNamespace(model="ECGResNet", batch_size=4)
+#     evaluate.tag = "t"
+#     evaluate.best_fold = 1
+#     evaluate.best_epoch = 3
+#     evaluate.OUTPUT_DIR = tmp_path
+#     evaluate.SEED = 0
+
+#     # Patch torch.cuda and config loader
+#     monkeypatch.setattr("torch.cuda.is_available", lambda: False)
+
+#     dummy_config_path = tmp_path / "config_t.yaml"
+#     # dummy_config_path.write_text("model: MockNet\nbatch_size: 4\n")
+#     dummy_config_path.write_text(
+#         "model: ECGResNet\n"
+#         "batch_size: 4\n"
+#         "lr: 0.001\n"
+#         "weight_decay: 0.0\n"
+#         "n_epochs: 1\n"
+#         "save_best: true\n"
+#         "sample_only: false\n"
+#         "subsample_frac: 1.0\n"
+#         "sampling_rate: 100\n"
+#     )
+#     monkeypatch.setattr(evaluate, "RESULTS_DIR", tmp_path)
+#     monkeypatch.setattr(evaluate, "_latest_config_path", lambda: dummy_config_path)
+
+#     # Ensure evaluate.main() gets a tag + fold without touching TrainConfig
+#     def _fake_load_config_and_extras(path, fold_override):
+#         cfg = SimpleNamespace(
+#             model="ECGResNet",
+#             batch_size=4,
+#             lr=0.001,
+#             weight_decay=0.0,
+#             n_epochs=1,
+#             save_best=True,
+#             sample_only=False,
+#             subsample_frac=1.0,
+#             sampling_rate=100,
+#             data_dir=None,
+#             sample_dir=None,
+#         )
+#         extras = {"tag": "t", "fold": 1, "config": str(path)}
+#         return cfg, extras
+
+#     monkeypatch.setattr(
+#         evaluate, "_load_config_and_extras", _fake_load_config_and_extras
+#     )
+
+#     # Avoid touching the filesystem: pretend there is a summary for this tag
+#     monkeypatch.setattr(
+#         evaluate,
+#         "_read_summary",
+#         lambda tag: [
+#             {
+#                 "model_path": str(tmp_path / "mock.pt"),
+#                 "best_epoch": 3,
+#                 "loss": 0.1,
+#                 "val_acc": 0.9,
+#                 # include fold if your code branches on it; harmless otherwise
+#                 "fold": 1,
+#             }
+#         ],
+#         raising=False,
+#     )
+
+#     # NOTE: evaluate.main() calls _select_best_entry (not _choose_best_entry)
+#     monkeypatch.setattr(
+#         evaluate,
+#         "_select_best_entry",
+#         lambda summaries, fold_override=None: summaries[0],
+#         raising=False,
+#     )
+
+#     # Force main() to use a tiny synthetic dataset instead of loading PTB-XL
+#     class _DummyMeta:
+#         def __init__(self, n):
+#             self._n = n
+
+#         @property
+#         def loc(self):
+#             return self
+
+#         def __getitem__(self, key):
+#             # support boolean mask indexing by returning self
+#             return self
+
+#         def reset_index(self, drop=False):
+#             return self
+
+#     def _fake_load_ptbxl_full(
+#         data_dir=None,
+#         sample_dir=None,
+#         sampling_rate=None,
+#         subsample_frac=None,
+#         **_,
+#     ):
+#         X = torch.ones((12, 12, 100)).numpy()
+#         y = ["NORM"] * 6 + ["MI"] * 6
+#         meta = _DummyMeta(12)
+#         return X, y, meta
+
+#     monkeypatch.setattr(
+#         evaluate, "load_ptbxl_full", _fake_load_ptbxl_full, raising=False
+#     )
+
+#     # Don’t generate plots or read history; just no-op
+#     monkeypatch.setattr(
+#         evaluate,
+#         "evaluate_and_plot",
+#         lambda *args, **kwargs: None,
+#         raising=False,
+#     )
+
+#     # Replace the real model factory under the same key the config uses
+#     monkeypatch.setitem(
+#         evaluate.MODEL_CLASSES,
+#         "ECGResNet",
+#         lambda num_classes, **kw: _TinyLogitModel(num_classes=num_classes, **kw),
+#     )
+
+#     # Keep the test hermetic: create the weights file and stub torch.load
+#     (tmp_path / "mock.pt").write_bytes(b"")  # satisfy Path.exists()
+#     monkeypatch.setattr("torch.load", lambda *a, **k: {}, raising=False)
+
+#     # Patch the registry in BOTH modules to avoid import-time aliasing issues
+#     monkeypatch.setitem(
+#         models.MODEL_CLASSES,
+#         "ECGResNet",
+#         lambda num_classes, **kw: _TinyLogitModel(num_classes=num_classes, **kw),
+#     )
+#     monkeypatch.setitem(
+#         evaluate.MODEL_CLASSES,
+#         "ECGResNet",
+#         lambda num_classes, **kw: _TinyLogitModel(num_classes=num_classes, **kw),
+#     )
+
+#     # Build a fresh registry that definitely contains our dummy model
+#     def _ecg_resnet_factory(num_classes, **kw):
+#         return _TinyLogitModel(num_classes=num_classes, **kw)
+
+#     # Rebind the dict in BOTH modules so aliasing/order can’t bite us
+#     monkeypatch.setattr(
+#         models, "MODEL_CLASSES", {"ECGResNet": _ecg_resnet_factory}, raising=False
+#     )
+#     monkeypatch.setattr(
+#         evaluate, "MODEL_CLASSES", {"ECGResNet": _ecg_resnet_factory}, raising=False
+#     )
+
+#     # Call main with string values for shap_* overrides
+#     evaluate.main(
+#         shap_profile="custom",
+#         shap_n="12",
+#         shap_bg="6",
+#         shap_stride="3",
+#     )
+
+#     # Check that string inputs were parsed correctly
+#     assert saved_params["n"] == 12
+#     assert saved_params["bg"] == 6
+#     assert saved_params["stride"] == math.ceil(evaluate.dataset.tensors[0].shape[2] / 3)
+
+
+# def test_eval_shap_custom_profile_parses_ints(monkeypatch, tmp_path):
+#     """
+#     Covers: custom SHAP profile with string inputs (shap_n, shap_bg, shap_stride)
+
+#     Ensures that string arguments are correctly parsed as integers, and passed
+#     into SHAP routines. This covers the `int(...)` conversion logic when
+#     shap_profile == "custom".
+
+#     Expected behavior:
+#         - shap_n = "12" --> 12
+#         - shap_bg = "6" --> 6
+#         - shap_stride = "3" --> 3
+#     """
+
+#     # Track values passed into SHAP save
+#     saved_params = {}
+
+#     def mock_sample_background(X, max_background, seed):
+#         out = torch.ones((max_background, X.shape[1], X.shape[2]))
+#         saved_params["bg"] = out.shape[0]
+#         return out
+
+#     monkeypatch.setattr(evaluate, "shap_sample_background", mock_sample_background)
+#     monkeypatch.setattr(
+#         evaluate,
+#         "shap_compute_values",
+#         lambda model, x, bg, device=None: torch.ones(
+#             (x.shape[0], x.shape[1], x.shape[2])
+#         ),
+#     )
+#     monkeypatch.setattr(
+#         evaluate,
+#         "_shap_stability_report",
+#         lambda sv, class_names=None: "mock report",
+#     )
+
+#     def fake_save(sv, X, outdir, fname):
+#         saved_params["n"] = X.shape[0]
+#         saved_params["stride"] = X.shape[2]
+#         return "mock_output.png"
+
+#     monkeypatch.setattr(evaluate, "shap_save_channel_summary", fake_save)
+
+#     # Prepare minimal context
+#     evaluate.model = MagicMock()
+#     evaluate.model.eval = lambda: None
+#     evaluate.device = torch.device("cpu")
+#     evaluate.dataset = TensorDataset(
+#         torch.ones((12, 12, 100)), torch.zeros(12, dtype=torch.long)
+#     )
+#     evaluate.config = SimpleNamespace(model="ECGResNet", batch_size=4)
+#     evaluate.tag = "t"
+#     evaluate.best_fold = 1
+#     evaluate.best_epoch = 3
+#     evaluate.OUTPUT_DIR = tmp_path
+#     evaluate.SEED = 0
+
+#     # Patch torch.cuda and config loader
+#     monkeypatch.setattr("torch.cuda.is_available", lambda: False)
+
+#     dummy_config_path = tmp_path / "config_t.yaml"
+#     dummy_config_path.write_text(
+#         "model: ECGResNet\n"
+#         "batch_size: 4\n"
+#         "lr: 0.001\n"
+#         "weight_decay: 0.0\n"
+#         "n_epochs: 1\n"
+#         "save_best: true\n"
+#         "sample_only: false\n"
+#         "subsample_frac: 1.0\n"
+#         "sampling_rate: 100\n"
+#     )
+#     monkeypatch.setattr(evaluate, "RESULTS_DIR", tmp_path)
+#     monkeypatch.setattr(evaluate, "_latest_config_path", lambda: dummy_config_path)
+
+#     # Ensure evaluate.main() gets a tag + fold without touching TrainConfig
+#     def _fake_load_config_and_extras(path, fold_override):
+#         cfg = SimpleNamespace(
+#             model="ECGResNet",
+#             batch_size=4,
+#             lr=0.001,
+#             weight_decay=0.0,
+#             n_epochs=1,
+#             save_best=True,
+#             sample_only=False,
+#             subsample_frac=1.0,
+#             sampling_rate=100,
+#             data_dir=None,
+#             sample_dir=None,
+#         )
+#         extras = {"tag": "t", "fold": 1, "config": str(path)}
+#         return cfg, extras
+
+#     monkeypatch.setattr(
+#         evaluate, "_load_config_and_extras", _fake_load_config_and_extras
+#     )
+
+#     # Avoid touching the filesystem: pretend there is a summary for this tag
+#     monkeypatch.setattr(
+#         evaluate,
+#         "_read_summary",
+#         lambda tag: [
+#             {
+#                 "model_path": str(tmp_path / "mock.pt"),
+#                 "best_epoch": 3,
+#                 "loss": 0.1,
+#                 "val_acc": 0.9,
+#                 # include fold if your code branches on it; harmless otherwise
+#                 "fold": 1,
+#             }
+#         ],
+#         raising=False,
+#     )
+
+#     # NOTE: evaluate.main() calls _select_best_entry (not _choose_best_entry)
+#     monkeypatch.setattr(
+#         evaluate,
+#         "_select_best_entry",
+#         lambda summaries, fold_override=None: summaries[0],
+#         raising=False,
+#     )
+
+#     # Force main() to use a tiny synthetic dataset instead of loading PTB-XL
+#     class _DummyMeta:
+#         @property
+#         def loc(self):
+#             return self
+
+#         def __getitem__(self, key):
+#             return self
+
+#         def reset_index(self, drop=False):
+#             return self
+
+#     def _fake_load_ptbxl_full(
+#         data_dir=None,
+#         sample_dir=None,
+#         sampling_rate=None,
+#         subsample_frac=None,
+#         **_,
+#     ):
+#         X = torch.ones((12, 12, 100)).numpy()
+#         y = ["NORM"] * 6 + ["MI"] * 6  # 1-D labels, balanced
+#         meta = _DummyMeta()
+#         return X, y, meta
+
+#     monkeypatch.setattr(
+#         evaluate, "load_ptbxl_full", _fake_load_ptbxl_full, raising=False
+#     )
+
+#     # Don’t generate plots or read history; just no-op
+#     monkeypatch.setattr(
+#         evaluate,
+#         "evaluate_and_plot",
+#         lambda *args, **kwargs: None,
+#         raising=False,
+#     )
+
+#     # Replace the real model factory under the same key the config uses
+#     monkeypatch.setitem(
+#         evaluate.MODEL_CLASSES,
+#         "ECGResNet",
+#         lambda num_classes, **kw: _TinyLogitModel(num_classes=num_classes, **kw),
+#     )
+
+#     # Keep the test hermetic: create the weights file and stub torch.load
+#     (tmp_path / "mock.pt").write_bytes(b"")  # satisfy Path.exists()
+#     monkeypatch.setattr("torch.load", lambda *a, **k: {}, raising=False)
+
+#     # Patch the registry in BOTH modules to avoid import-time aliasing issues
+#     monkeypatch.setitem(
+#         models.MODEL_CLASSES,
+#         "ECGResNet",
+#         lambda num_classes, **kw: _TinyLogitModel(num_classes=num_classes, **kw),
+#     )
+#     monkeypatch.setitem(
+#         evaluate.MODEL_CLASSES,
+#         "ECGResNet",
+#         lambda num_classes, **kw: _TinyLogitModel(num_classes=num_classes, **kw),
+#     )
+
+#     # Build a fresh registry that definitely contains our dummy model
+#     def _ecg_resnet_factory(num_classes, **kw):
+#         return _TinyLogitModel(num_classes=num_classes, **kw)
+
+#     # Rebind the dict in BOTH modules so aliasing/order can’t bite us
+#     monkeypatch.setattr(
+#         models, "MODEL_CLASSES", {"ECGResNet": _ecg_resnet_factory}, raising=False
+#     )
+#     monkeypatch.setattr(
+#         evaluate, "MODEL_CLASSES", {"ECGResNet": _ecg_resnet_factory}, raising=False
+#     )
+
+#     # # --- prevent sklearn metric warnings on synthetic data for this test only ---
+#     # monkeypatch.setattr(
+#     #     "sklearn.metrics.precision_recall_fscore_support",
+#     #     lambda *a, **k: ([0], [0], [0], [0]),
+#     #     raising=False,
+#     # )
+#     # monkeypatch.setattr(
+#     #     "sklearn.metrics.classification_report",
+#     #     lambda *a, **k: "ok",
+#     #     raising=False,
+#     # )
+#     # # --- end patch ---
+
+#     # --- fix: force 1-D labels coming from loaders for this test only ---
+#     _prev_full = evaluate.load_ptbxl_full
+
+#     def _wrap_full(*args, **kwargs):
+#         X, y, meta = _prev_full(*args, **kwargs)
+#         # Flatten [["NORM"],["MI"],...] -> ["NORM","MI",...], coerce to str
+#         if (
+#             isinstance(y, list)
+#             and y
+#             and isinstance(y[0], (list, tuple))
+#             and len(y[0]) == 1
+#         ):
+#             y = [str(v[0]) for v in y]
+#         elif (
+#             hasattr(y, "shape")
+#             and isinstance(y.shape, tuple)
+#             and len(y.shape) == 2
+#             and y.shape[1] == 1
+#         ):
+#             y = [str(y[i, 0]) for i in range(y.shape[0])]
+#         else:
+#             y = [str(v) for v in y]
+#         return X, y, meta
+
+#     monkeypatch.setattr(evaluate, "load_ptbxl_full", _wrap_full, raising=False)
+
+#     # Some paths may call the sample loader instead; wrap that too if present.
+#     if hasattr(evaluate, "load_ptbxl_sample"):
+#         _prev_samp = evaluate.load_ptbxl_sample
+
+#         def _wrap_samp(*args, **kwargs):
+#             X, y, meta = _prev_samp(*args, **kwargs)
+#             if (
+#                 isinstance(y, list)
+#                 and y
+#                 and isinstance(y[0], (list, tuple))
+#                 and len(y[0]) == 1
+#             ):
+#                 y = [str(v[0]) for v in y]
+#             elif (
+#                 hasattr(y, "shape")
+#                 and isinstance(y.shape, tuple)
+#                 and len(y.shape) == 2
+#                 and y.shape[1] == 1
+#             ):
+#                 y = [str(y[i, 0]) for i in range(y.shape[0])]
+#             else:
+#                 y = [str(v) for v in y]
+#             return X, y, meta
+
+#         monkeypatch.setattr(evaluate, "load_ptbxl_sample", _wrap_samp, raising=False)
+#     # --- end fix ---
+
+#     # Call main with string values for shap_* overrides
+#     evaluate.main(
+#         shap_profile="custom",
+#         shap_n="12",
+#         shap_bg="6",
+#         shap_stride="3",
+#     )
+
+#     # Check that string inputs were parsed correctly
+#     assert saved_params["n"] == 12
+#     assert saved_params["bg"] == 6
+#     assert saved_params["stride"] == math.ceil(evaluate.dataset.tensors[0].shape[2] / 3)
+
+
+# def test_eval_shap_custom_profile_parses_ints(monkeypatch, tmp_path):
+#     """
+#     Covers: custom SHAP profile with string inputs (shap_n, shap_bg, shap_stride)
+
+#     Ensures that string arguments are correctly parsed as integers, and passed
+#     into SHAP routines. This covers the `int(...)` conversion logic when
+#     shap_profile == "custom".
+
+#     Expected behavior:
+#         - shap_n = "12" --> 12
+#         - shap_bg = "6" --> 6
+#         - shap_stride = "3" --> 3
+#     """
+
+#     # Track values passed into SHAP save
+#     saved_params = {}
+
+#     def mock_sample_background(X, max_background, seed):
+#         out = torch.ones((max_background, X.shape[1], X.shape[2]))
+#         saved_params["bg"] = out.shape[0]
+#         return out
+
+#     monkeypatch.setattr(evaluate, "shap_sample_background", mock_sample_background)
+#     monkeypatch.setattr(
+#         evaluate,
+#         "shap_compute_values",
+#         lambda model, x, bg, device=None: torch.ones(
+#             (x.shape[0], x.shape[1], x.shape[2])
+#         ),
+#     )
+#     monkeypatch.setattr(
+#         evaluate,
+#         "_shap_stability_report",
+#         lambda sv, class_names=None: "mock report",
+#     )
+
+#     def fake_save(sv, X, outdir, fname):
+#         saved_params["n"] = X.shape[0]
+#         saved_params["stride"] = X.shape[2]
+#         return "mock_output.png"
+
+#     monkeypatch.setattr(evaluate, "shap_save_channel_summary", fake_save)
+
+#     # Prepare minimal context
+#     evaluate.model = MagicMock()
+#     evaluate.model.eval = lambda: None
+#     evaluate.device = torch.device("cpu")
+#     evaluate.dataset = TensorDataset(
+#         torch.ones((12, 12, 100)), torch.zeros(12, dtype=torch.long)
+#     )
+#     evaluate.config = SimpleNamespace(model="ECGResNet", batch_size=4)
+#     evaluate.tag = "t"
+#     evaluate.best_fold = 1
+#     evaluate.best_epoch = 3
+#     evaluate.OUTPUT_DIR = tmp_path
+#     evaluate.SEED = 0
+
+#     # Patch torch.cuda and config loader
+#     monkeypatch.setattr("torch.cuda.is_available", lambda: False)
+
+#     dummy_config_path = tmp_path / "config_t.yaml"
+#     dummy_config_path.write_text(
+#         "model: ECGResNet\n"
+#         "batch_size: 4\n"
+#         "lr: 0.001\n"
+#         "weight_decay: 0.0\n"
+#         "n_epochs: 1\n"
+#         "save_best: true\n"
+#         "sample_only: false\n"
+#         "subsample_frac: 1.0\n"
+#         "sampling_rate: 100\n"
+#     )
+#     monkeypatch.setattr(evaluate, "RESULTS_DIR", tmp_path)
+#     monkeypatch.setattr(evaluate, "_latest_config_path", lambda: dummy_config_path)
+
+#     # Ensure evaluate.main() gets a tag + fold without touching TrainConfig
+#     def _fake_load_config_and_extras(path, fold_override):
+#         cfg = SimpleNamespace(
+#             model="ECGResNet",
+#             batch_size=4,
+#             lr=0.001,
+#             weight_decay=0.0,
+#             n_epochs=1,
+#             save_best=True,
+#             sample_only=False,
+#             subsample_frac=1.0,
+#             sampling_rate=100,
+#             data_dir=None,
+#             sample_dir=None,
+#         )
+#         extras = {"tag": "t", "fold": 1, "config": str(path)}
+#         return cfg, extras
+
+#     monkeypatch.setattr(
+#         evaluate, "_load_config_and_extras", _fake_load_config_and_extras
+#     )
+
+#     # Avoid touching the filesystem: pretend there is a summary for this tag
+#     monkeypatch.setattr(
+#         evaluate,
+#         "_read_summary",
+#         lambda tag: [
+#             {
+#                 "model_path": str(tmp_path / "mock.pt"),
+#                 "best_epoch": 3,
+#                 "loss": 0.1,
+#                 "val_acc": 0.9,
+#                 # include fold if your code branches on it; harmless otherwise
+#                 "fold": 1,
+#             }
+#         ],
+#         raising=False,
+#     )
+
+#     # NOTE: evaluate.main() calls _select_best_entry (not _choose_best_entry)
+#     monkeypatch.setattr(
+#         evaluate,
+#         "_select_best_entry",
+#         lambda summaries, fold_override=None: summaries[0],
+#         raising=False,
+#     )
+
+#     # Force main() to use a tiny synthetic dataset instead of loading PTB-XL
+#     class _DummyMeta:
+#         @property
+#         def loc(self):
+#             return self
+
+#         def __getitem__(self, key):
+#             return self
+
+#         def reset_index(self, drop=False):
+#             return self
+
+#     def _fake_load_ptbxl_full(
+#         data_dir=None,
+#         sample_dir=None,
+#         sampling_rate=None,
+#         subsample_frac=None,
+#         **_,
+#     ):
+#         X = torch.ones((12, 12, 100)).numpy()
+#         y = ["NORM"] * 6 + ["MI"] * 6  # 1-D labels, balanced
+#         meta = _DummyMeta()
+#         return X, y, meta
+
+#     monkeypatch.setattr(
+#         evaluate, "load_ptbxl_full", _fake_load_ptbxl_full, raising=False
+#     )
+
+#     # Don’t generate plots or read history; just no-op
+#     monkeypatch.setattr(
+#         evaluate,
+#         "evaluate_and_plot",
+#         lambda *args, **kwargs: None,
+#         raising=False,
+#     )
+
+#     # Replace the real model factory under the same key the config uses
+#     monkeypatch.setitem(
+#         evaluate.MODEL_CLASSES,
+#         "ECGResNet",
+#         lambda num_classes, **kw: _TinyLogitModel(num_classes=num_classes, **kw),
+#     )
+
+#     # Keep the test hermetic: create the weights file and stub torch.load
+#     (tmp_path / "mock.pt").write_bytes(b"")  # satisfy Path.exists()
+#     monkeypatch.setattr("torch.load", lambda *a, **k: {}, raising=False)
+
+#     # Patch the registry in BOTH modules to avoid import-time aliasing issues
+#     monkeypatch.setitem(
+#         models.MODEL_CLASSES,
+#         "ECGResNet",
+#         lambda num_classes, **kw: _TinyLogitModel(num_classes=num_classes, **kw),
+#     )
+#     monkeypatch.setitem(
+#         evaluate.MODEL_CLASSES,
+#         "ECGResNet",
+#         lambda num_classes, **kw: _TinyLogitModel(num_classes=num_classes, **kw),
+#     )
+
+#     # Build a fresh registry that definitely contains our dummy model
+#     def _ecg_resnet_factory(num_classes, **kw):
+#         return _TinyLogitModel(num_classes=num_classes, **kw)
+
+#     # Rebind the dict in BOTH modules so aliasing/order can’t bite us
+#     monkeypatch.setattr(
+#         models, "MODEL_CLASSES", {"ECGResNet": _ecg_resnet_factory}, raising=False
+#     )
+#     monkeypatch.setattr(
+#         evaluate, "MODEL_CLASSES", {"ECGResNet": _ecg_resnet_factory}, raising=False
+#     )
+
+#     # --- patch metrics INSIDE evaluate so they can't warn in this test ---
+#     monkeypatch.setattr(
+#         evaluate, "precision_recall_fscore_support",
+#         lambda *a, **k: ([0.0], [0.0], [0.0], [0]),
+#         raising=False,
+#     )
+#     monkeypatch.setattr(
+#         evaluate, "classification_report",
+#         lambda *a, **k: "ok",
+#         raising=False,
+#     )
+#     # --- end patch ---
+
+#     # Call main with string values for shap_* overrides
+#     evaluate.main(
+#         shap_profile="custom",
+#         shap_n="12",
+#         shap_bg="6",
+#         shap_stride="3",
+#     )
+
+#     # Check that string inputs were parsed correctly
+#     assert saved_params["n"] == 12
+#     assert saved_params["bg"] == 6
+#     assert saved_params["stride"] == math.ceil(evaluate.dataset.tensors[0].shape[2] / 3)
+
+
+# def test_eval_shap_custom_profile_parses_ints(monkeypatch, tmp_path):
+# """
+# Covers: custom SHAP profile with string inputs (shap_n, shap_bg, shap_stride)
+
+# Ensures that string arguments are correctly parsed as integers, and passed
+# into SHAP routines. This covers the `int(...)` conversion logic when
+# shap_profile == "custom".
+
+# Expected behavior:
+#     - shap_n = "12" --> 12
+#     - shap_bg = "6" --> 6
+#     - shap_stride = "3" --> 3
+# """
+
+# # Track values passed into SHAP save
+# saved_params = {}
+
+# def mock_sample_background(X, max_background, seed):
+#     out = torch.ones((max_background, X.shape[1], X.shape[2]))
+#     saved_params["bg"] = out.shape[0]
+#     return out
+
+# monkeypatch.setattr(evaluate, "shap_sample_background", mock_sample_background)
+# monkeypatch.setattr(
+#     evaluate,
+#     "shap_compute_values",
+#     lambda model, x, bg, device=None: torch.ones(
+#         (x.shape[0], x.shape[1], x.shape[2])
+#     ),
+# )
+# monkeypatch.setattr(
+#     evaluate,
+#     "_shap_stability_report",
+#     lambda sv, class_names=None: "mock report",
+# )
+
+# def fake_save(sv, X, outdir, fname):
+#     saved_params["n"] = X.shape[0]
+#     saved_params["stride"] = X.shape[2]
+#     return "mock_output.png"
+
+# monkeypatch.setattr(evaluate, "shap_save_channel_summary", fake_save)
+
+# # Prepare minimal context
+# evaluate.model = MagicMock()
+# evaluate.model.eval = lambda: None
+# evaluate.device = torch.device("cpu")
+# evaluate.dataset = TensorDataset(
+#     torch.ones((12, 12, 100)), torch.zeros(12, dtype=torch.long)
+# )
+# evaluate.config = SimpleNamespace(model="ECGResNet", batch_size=4)
+# evaluate.tag = "t"
+# evaluate.best_fold = 1
+# evaluate.best_epoch = 3
+# evaluate.OUTPUT_DIR = tmp_path
+# evaluate.SEED = 0
+
+# # Patch torch.cuda and config loader
+# monkeypatch.setattr("torch.cuda.is_available", lambda: False)
+
+# dummy_config_path = tmp_path / "config_t.yaml"
+# dummy_config_path.write_text(
+#     "model: ECGResNet\n"
+#     "batch_size: 4\n"
+#     "lr: 0.001\n"
+#     "weight_decay: 0.0\n"
+#     "n_epochs: 1\n"
+#     "save_best: true\n"
+#     "sample_only: false\n"
+#     "subsample_frac: 1.0\n"
+#     "sampling_rate: 100\n"
+# )
+# monkeypatch.setattr(evaluate, "RESULTS_DIR", tmp_path)
+# monkeypatch.setattr(evaluate, "_latest_config_path", lambda: dummy_config_path)
+
+# # Ensure evaluate.main() gets a tag + fold without touching TrainConfig
+# def _fake_load_config_and_extras(path, fold_override):
+#     cfg = SimpleNamespace(
+#         model="ECGResNet",
+#         batch_size=4,
+#         lr=0.001,
+#         weight_decay=0.0,
+#         n_epochs=1,
+#         save_best=True,
+#         sample_only=False,
+#         subsample_frac=1.0,
+#         sampling_rate=100,
+#         data_dir=None,
+#         sample_dir=None,
+#     )
+#     extras = {"tag": "t", "fold": 1, "config": str(path)}
+#     return cfg, extras
+
+# monkeypatch.setattr(
+#     evaluate, "_load_config_and_extras", _fake_load_config_and_extras
+# )
+
+# # Avoid touching the filesystem: pretend there is a summary for this tag
+# monkeypatch.setattr(
+#     evaluate,
+#     "_read_summary",
+#     lambda tag: [
+#         {
+#             "model_path": str(tmp_path / "mock.pt"),
+#             "best_epoch": 3,
+#             "loss": 0.1,
+#             "val_acc": 0.9,
+#             # include fold if your code branches on it; harmless otherwise
+#             "fold": 1,
+#         }
+#     ],
+#     raising=False,
+# )
+
+# # NOTE: evaluate.main() calls _select_best_entry (not _choose_best_entry)
+# monkeypatch.setattr(
+#     evaluate,
+#     "_select_best_entry",
+#     lambda summaries, fold_override=None: summaries[0],
+#     raising=False,
+# )
+
+# # Force main() to use a tiny synthetic dataset instead of loading PTB-XL
+# # Minimal "meta" that supports meta.loc[mask].reset_index(drop=True)
+# class _Meta:
+#     @property
+#     def loc(self):
+#         return self
+
+#     def __getitem__(self, key):
+#         return self
+
+#     def reset_index(self, drop=False):
+#         return self
+
+# meta = _Meta()
+# monkeypatch.setattr(
+#     evaluate,
+#     "load_ptbxl_full",
+#     lambda *args, **kwargs: (
+#         torch.ones((12, 12, 100)).numpy(),
+#         ["NORM"] * 6 + ["MI"] * 6,
+#         meta,
+#     ),
+#     raising=False,
+# )
+
+# # Don’t generate plots or read history; just no-op
+# monkeypatch.setattr(
+#     evaluate, "evaluate_and_plot", lambda *args, **kwargs: None, raising=False
+# )
+
+# # Ensure our tiny model is used (reuse existing _TinyLogitModel)
+# monkeypatch.setitem(
+#     evaluate.MODEL_CLASSES,
+#     "ECGResNet",
+#     lambda num_classes, **kw: _TinyLogitModel(num_classes=num_classes, **kw),
+# )
+# monkeypatch.setitem(
+#     models.MODEL_CLASSES,
+#     "ECGResNet",
+#     lambda num_classes, **kw: _TinyLogitModel(num_classes=num_classes, **kw),
+# )
+
+# # Keep the test hermetic: create the weights file and stub torch.load
+# (tmp_path / "mock.pt").write_bytes(b"")
+# monkeypatch.setattr("torch.load", lambda *a, **k: {}, raising=False)
+
+# # Patch metric functions **in evaluate** (evaluate likely imported them directly)
+# monkeypatch.setattr(
+#     evaluate,
+#     "precision_recall_fscore_support",
+#     lambda *a, **k: ([0.0], [0.0], [0.0], [0]),
+#     raising=False,
+# )
+# monkeypatch.setattr(
+#     evaluate,
+#     "classification_report",
+#     lambda *a, **k: "ok",
+#     raising=False,
+# )
+
+# # use the existing _TinyLogitModel, no extra helpers
+# monkeypatch.setattr(
+#     models, "MODEL_CLASSES", {"ECGResNet": _TinyLogitModel}, raising=False
+# )
+# monkeypatch.setattr(
+#     evaluate, "MODEL_CLASSES", {"ECGResNet": _TinyLogitModel}, raising=False
+# )
+
+# # Call main with string values for shap_* overrides
+# evaluate.main(
+#     shap_profile="custom",
+#     shap_n="12",
+#     shap_bg="6",
+#     shap_stride="3",
+# )
+
+# # Check that string inputs were parsed correctly
+# assert saved_params["n"] == 12
+# assert saved_params["bg"] == 6
+# assert saved_params["stride"] == math.ceil(evaluate.dataset.tensors[0].shape[2] / 3)
+
+
+# def test_eval_shap_custom_profile_parses_ints(monkeypatch, tmp_path):
+#     """
+#     Covers: custom SHAP profile with string inputs (shap_n, shap_bg, shap_stride)
+
+#     Ensures that string arguments are correctly parsed as integers, and passed
+#     into SHAP routines. This covers the `int(...)` conversion logic when
+#     shap_profile == "custom".
+
+#     Expected behavior:
+#         - shap_n = "12" --> 12
+#         - shap_bg = "6" --> 6
+#         - shap_stride = "3" --> 3
+#     """
+
+#     # Track values passed into SHAP save
+#     saved_params = {}
+
+#     def mock_sample_background(X, max_background, seed):
+#         out = torch.ones((max_background, X.shape[1], X.shape[2]))
+#         saved_params["bg"] = out.shape[0]
+#         return out
+
+#     monkeypatch.setattr(evaluate, "shap_sample_background", mock_sample_background)
+#     monkeypatch.setattr(
+#         evaluate,
+#         "shap_compute_values",
+#         lambda model, x, bg, device=None: torch.ones(
+#             (x.shape[0], x.shape[1], x.shape[2])
+#         ),
+#     )
+#     monkeypatch.setattr(
+#         evaluate,
+#         "_shap_stability_report",
+#         lambda sv, class_names=None: "mock report",
+#     )
+
+#     def fake_save(sv, X, outdir, fname):
+#         saved_params["n"] = X.shape[0]
+#         saved_params["stride"] = X.shape[2]
+#         return "mock_output.png"
+
+#     monkeypatch.setattr(evaluate, "shap_save_channel_summary", fake_save)
+
+#     # Prepare minimal context
+#     evaluate.model = MagicMock()
+#     evaluate.model.eval = lambda: None
+#     evaluate.device = torch.device("cpu")
+#     evaluate.dataset = TensorDataset(
+#         torch.ones((12, 12, 100)), torch.zeros(12, dtype=torch.long)
+#     )
+#     evaluate.config = SimpleNamespace(model="ECGResNet", batch_size=4)
+#     evaluate.tag = "t"
+#     evaluate.best_fold = 1
+#     evaluate.best_epoch = 3
+#     evaluate.OUTPUT_DIR = tmp_path
+#     evaluate.SEED = 0
+
+#     # Patch torch.cuda and config loader
+#     monkeypatch.setattr("torch.cuda.is_available", lambda: False)
+
+#     dummy_config_path = tmp_path / "config_t.yaml"
+#     dummy_config_path.write_text(
+#         "model: ECGResNet\n"
+#         "batch_size: 4\n"
+#         "lr: 0.001\n"
+#         "weight_decay: 0.0\n"
+#         "n_epochs: 1\n"
+#         "save_best: true\n"
+#         "sample_only: false\n"
+#         "subsample_frac: 1.0\n"
+#         "sampling_rate: 100\n"
+#         "tag: t\n"
+#     )
+#     monkeypatch.setattr(evaluate, "RESULTS_DIR", tmp_path)
+#     monkeypatch.setattr(evaluate, "_latest_config_path", lambda: dummy_config_path)
+
+#     # Avoid touching the filesystem: pretend there is a summary for this tag
+#     monkeypatch.setattr(
+#         evaluate,
+#         "_read_summary",
+#         lambda tag: [
+#             {
+#                 "model_path": str(tmp_path / "mock.pt"),
+#                 "best_epoch": 3,
+#                 "loss": 0.1,
+#                 "val_acc": 0.9,
+#                 # include fold if your code branches on it; harmless otherwise
+#                 "fold": 1,
+#             }
+#         ],
+#         raising=False,
+#     )
+
+#     # NOTE: evaluate.main() calls _select_best_entry (not _choose_best_entry)
+#     monkeypatch.setattr(
+#         evaluate,
+#         "_select_best_entry",
+#         lambda summaries, fold_override=None: summaries[0],
+#         raising=False,
+#     )
+
+#     # Force main() to use a tiny synthetic dataset instead of loading PTB-XL
+#     class _Meta:
+#         @property
+#         def loc(self):
+#             return self
+
+#         def __getitem__(self, key):
+#             return self
+
+#         def reset_index(self, drop=False):
+#             return self
+
+#     meta = _Meta()
+#     monkeypatch.setattr(
+#         evaluate,
+#         "load_ptbxl_full",
+#         lambda *args, **kwargs: (
+#             torch.ones((12, 12, 100)).numpy(),
+#             ["NORM"] * 6 + ["MI"] * 6,  # 1-D, balanced
+#             meta,
+#         ),
+#         raising=False,
+#     )
+
+#     # Don’t generate plots or read history; just no-op
+#     monkeypatch.setattr(
+#         evaluate, "evaluate_and_plot", lambda *a, **k: None, raising=False
+#     )
+
+#     # Ensure our tiny model is used (reuse existing _TinyLogitModel); rebind dicts
+#     monkeypatch.setattr(
+#         models, "MODEL_CLASSES", {"ECGResNet": _TinyLogitModel}, raising=False
+#     )
+#     monkeypatch.setattr(
+#         evaluate, "MODEL_CLASSES", {"ECGResNet": _TinyLogitModel}, raising=False
+#     )
+
+#     # Keep the test hermetic: create the weights file and stub torch.load
+#     (tmp_path / "mock.pt").write_bytes(b"")
+#     monkeypatch.setattr("torch.load", lambda *a, **k: {}, raising=False)
+
+#     # Patch metric functions **inside evaluate** (evaluate likely imported them directly)
+#     monkeypatch.setattr(
+#         evaluate,
+#         "precision_recall_fscore_support",
+#         lambda *a, **k: ([0.0], [0.0], [0.0], [0]),
+#         raising=False,
+#     )
+#     monkeypatch.setattr(
+#         evaluate,
+#         "classification_report",
+#         lambda *a, **k: "ok",
+#         raising=False,
+#     )
+
+#     # --- kill sklearn's column-vector label warning locally in this test ---
+#     monkeypatch.setattr(
+#         "sklearn.preprocessing._label.column_or_1d",
+#         lambda y, warn=True: (
+#             y.ravel()
+#             if hasattr(y, "ravel")
+#             else [
+#                 (v[0] if isinstance(v, (list, tuple)) and len(v) == 1 else v) for v in y
+#             ]
+#         ),
+#         raising=False,
+#     )
+#     # --- end patch ---
+
+#     # Call main with string values for shap_* overrides
+#     evaluate.main(
+#         shap_profile="custom",
+#         shap_n="12",
+#         shap_bg="6",
+#         shap_stride="3",
+#     )
+
+#     # Check that string inputs were parsed correctly
+#     assert saved_params["n"] == 12
+#     assert saved_params["bg"] == 6
+#     assert saved_params["stride"] == math.ceil(evaluate.dataset.tensors[0].shape[2] / 3)
+
+
+# def test_eval_shap_custom_profile_parses_ints(monkeypatch, tmp_path):
+#     """
+#     Covers: custom SHAP profile with string inputs (shap_n, shap_bg, shap_stride)
+
+#     Ensures that string arguments are correctly parsed as integers, and passed
+#     into SHAP routines. This covers the `int(...)` conversion logic when
+#     shap_profile == "custom".
+#     """
+
+#     # Track values passed into SHAP save
+#     saved_params = {}
+
+#     def mock_sample_background(X, max_background, seed):
+#         out = torch.ones((max_background, X.shape[1], X.shape[2]))
+#         saved_params["bg"] = out.shape[0]
+#         return out
+
+#     monkeypatch.setattr(evaluate, "shap_sample_background", mock_sample_background)
+#     monkeypatch.setattr(
+#         evaluate,
+#         "shap_compute_values",
+#         lambda model, x, bg, device=None: torch.ones(
+#             (x.shape[0], x.shape[1], x.shape[2])
+#         ),
+#     )
+#     monkeypatch.setattr(
+#         evaluate,
+#         "_shap_stability_report",
+#         lambda sv, class_names=None: "mock report",
+#     )
+
+#     def fake_save(sv, X, outdir, fname):
+#         saved_params["n"] = X.shape[0]
+#         saved_params["stride"] = X.shape[2]
+#         return "mock_output.png"
+
+#     monkeypatch.setattr(evaluate, "shap_save_channel_summary", fake_save)
+
+#     # Minimal context
+#     evaluate.model = MagicMock()
+#     evaluate.model.eval = lambda: None
+#     evaluate.device = torch.device("cpu")
+#     evaluate.dataset = TensorDataset(
+#         torch.ones((12, 12, 100)), torch.zeros(12, dtype=torch.long)
+#     )
+#     evaluate.config = SimpleNamespace(model="ECGResNet", batch_size=4)
+#     evaluate.tag = "t"
+#     evaluate.best_fold = 1
+#     evaluate.best_epoch = 3
+#     evaluate.OUTPUT_DIR = tmp_path
+#     evaluate.SEED = 0
+
+#     # No CUDA
+#     monkeypatch.setattr("torch.cuda.is_available", lambda: False)
+
+#     # Real YAML, but tiny
+#     dummy_config_path = tmp_path / "config_t.yaml"
+#     dummy_config_path.write_text(
+#         "model: ECGResNet\n"
+#         "batch_size: 4\n"
+#         "lr: 0.001\n"
+#         "weight_decay: 0.0\n"
+#         "n_epochs: 1\n"
+#         "save_best: true\n"
+#         "sample_only: false\n"
+#         "subsample_frac: 1.0\n"
+#         "sampling_rate: 100\n"
+#         "tag: t\n"
+#     )
+#     monkeypatch.setattr(evaluate, "RESULTS_DIR", tmp_path)
+#     monkeypatch.setattr(evaluate, "_latest_config_path", lambda: dummy_config_path)
+
+#     # Pretend there’s a summary
+#     monkeypatch.setattr(
+#         evaluate,
+#         "_read_summary",
+#         lambda tag: [
+#             {
+#                 "model_path": str(tmp_path / "mock.pt"),
+#                 "best_epoch": 3,
+#                 "loss": 0.1,
+#                 "val_acc": 0.9,
+#                 "fold": 1,
+#             }
+#         ],
+#         raising=False,
+#     )
+
+#     # Force the “pick best” path to pick the only one
+#     monkeypatch.setattr(
+#         evaluate,
+#         "_select_best_entry",
+#         lambda summaries, fold_override=None: summaries[0],
+#         raising=False,
+#     )
+
+#     # Minimal meta to satisfy meta.loc[mask].reset_index(...)
+#     class _Meta:
+#         @property
+#         def loc(self):
+#             return self
+
+#         def __getitem__(self, key):
+#             return self
+
+#         def reset_index(self, drop=False):
+#             return self
+
+#     meta = _Meta()
+
+#     # Synthetic data; IMPORTANT: y as a NumPy object array (so LabelEncoder sees .dtype)
+#     monkeypatch.setattr(
+#         evaluate,
+#         "load_ptbxl_full",
+#         lambda *args, **kwargs: (
+#             torch.ones((12, 12, 100)).numpy(),
+#             np.array(["NORM"] * 6 + ["MI"] * 6, dtype=object),  # 1-D object array
+#             meta,
+#         ),
+#         raising=False,
+#     )
+
+#     # Don’t produce plots or touch history
+#     monkeypatch.setattr(
+#         evaluate, "evaluate_and_plot", lambda *a, **k: None, raising=False
+#     )
+
+#     # Ensure our tiny model is used everywhere (rebind dicts)
+#     monkeypatch.setattr(
+#         models, "MODEL_CLASSES", {"ECGResNet": _TinyLogitModel}, raising=False
+#     )
+#     monkeypatch.setattr(
+#         evaluate, "MODEL_CLASSES", {"ECGResNet": _TinyLogitModel}, raising=False
+#     )
+
+#     # Torch load stub + weights file
+#     (tmp_path / "mock.pt").write_bytes(b"")
+#     monkeypatch.setattr("torch.load", lambda *a, **k: {}, raising=False)
+
+#     # Silence metric warnings by patching the names evaluate actually calls
+#     monkeypatch.setattr(
+#         evaluate,
+#         "precision_recall_fscore_support",
+#         lambda *a, **k: ([0.0], [0.0], [0.0], [0]),
+#         raising=False,
+#     )
+#     monkeypatch.setattr(
+#         evaluate,
+#         "classification_report",
+#         lambda *a, **k: "ok",
+#         raising=False,
+#     )
+
+#     # --- kill sklearn's column-vector warning for this test only ---
+#     monkeypatch.setattr(
+#         "sklearn.utils.validation.column_or_1d",
+#         lambda y, warn=True: (
+#             y.ravel()
+#             if hasattr(y, "ravel")
+#             else [
+#                 (v[0] if isinstance(v, (list, tuple)) and len(v) == 1 else v) for v in y
+#             ]
+#         ),
+#         raising=False,
+#     )
+#     # --- end patch ---
+
+#     # Call main with string SHAP args
+#     evaluate.main(
+#         shap_profile="custom",
+#         shap_n="12",
+#         shap_bg="6",
+#         shap_stride="3",
+#     )
+
+#     # Assertions
+#     assert saved_params["n"] == 12
+#     assert saved_params["bg"] == 6
+#     assert saved_params["stride"] == math.ceil(evaluate.dataset.tensors[0].shape[2] / 3)
+
+
+# def test_eval_shap_custom_profile_parses_ints(monkeypatch, tmp_path):
+#     """
+#     Covers: custom SHAP profile with string inputs (shap_n, shap_bg, shap_stride)
+
+#     Ensures that string arguments are correctly parsed as integers, and passed
+#     into SHAP routines. This covers the `int(...)` conversion logic when
+#     shap_profile == "custom".
+
+#     Expected behavior:
+#         - shap_n = "12" --> 12
+#         - shap_bg = "6" --> 6
+#         - shap_stride = "3" --> 3
+#     """
+
+#     # Track values passed into SHAP save
+#     saved_params = {}
+
+#     def mock_sample_background(X, max_background, seed):
+#         out = torch.ones((max_background, X.shape[1], X.shape[2]))
+#         saved_params["bg"] = out.shape[0]
+#         return out
+
+#     monkeypatch.setattr(evaluate, "shap_sample_background", mock_sample_background)
+#     monkeypatch.setattr(
+#         evaluate,
+#         "shap_compute_values",
+#         lambda model, x, bg, device=None: torch.ones(
+#             (x.shape[0], x.shape[1], x.shape[2])
+#         ),
+#     )
+#     monkeypatch.setattr(
+#         evaluate,
+#         "_shap_stability_report",
+#         lambda sv, class_names=None: "mock report",
+#     )
+
+#     def fake_save(sv, X, outdir, fname):
+#         saved_params["n"] = X.shape[0]
+#         saved_params["stride"] = X.shape[2]
+#         return "mock_output.png"
+
+#     monkeypatch.setattr(evaluate, "shap_save_channel_summary", fake_save)
+
+#     # Prepare minimal context used by evaluate.main
+#     evaluate.model = MagicMock()
+#     evaluate.model.eval = lambda: None
+#     evaluate.device = torch.device("cpu")
+#     evaluate.dataset = TensorDataset(
+#         torch.ones((12, 12, 100)), torch.zeros(12, dtype=torch.long)
+#     )
+#     evaluate.config = SimpleNamespace(model="ECGResNet", batch_size=4)
+#     evaluate.tag = "t"
+#     evaluate.best_fold = 1
+#     evaluate.best_epoch = 3
+#     evaluate.OUTPUT_DIR = tmp_path
+#     evaluate.SEED = 0
+
+#     # No CUDA
+#     monkeypatch.setattr("torch.cuda.is_available", lambda: False)
+
+#     # Tiny real-looking YAML so main() reads a config and sees a tag
+#     dummy_config_path = tmp_path / "config_t.yaml"
+#     dummy_config_path.write_text(
+#         "model: ECGResNet\n"
+#         "batch_size: 4\n"
+#         "lr: 0.001\n"
+#         "weight_decay: 0.0\n"
+#         "n_epochs: 1\n"
+#         "save_best: true\n"
+#         "sample_only: false\n"
+#         "subsample_frac: 1.0\n"
+#         "sampling_rate: 100\n"
+#         "tag: t\n"
+#     )
+#     monkeypatch.setattr(evaluate, "RESULTS_DIR", tmp_path)
+#     monkeypatch.setattr(evaluate, "_latest_config_path", lambda: dummy_config_path)
+
+#     # Pretend there’s a summary for this tag
+#     monkeypatch.setattr(
+#         evaluate,
+#         "_read_summary",
+#         lambda tag: [
+#             {
+#                 "model_path": str(tmp_path / "mock.pt"),
+#                 "best_epoch": 3,
+#                 "loss": 0.1,
+#                 "val_acc": 0.9,
+#                 "fold": 1,
+#             }
+#         ],
+#         raising=False,
+#     )
+
+#     # Make best-entry selection trivial
+#     monkeypatch.setattr(
+#         evaluate,
+#         "_select_best_entry",
+#         lambda summaries, fold_override=None: summaries[0],
+#         raising=False,
+#     )
+
+#     # Minimal meta supporting meta.loc[mask].reset_index(...)
+#     class _Meta:
+#         @property
+#         def loc(self):
+#             return self
+
+#         def __getitem__(self, key):
+#             return self
+
+#         def reset_index(self, drop=False):
+#             return self
+
+#     meta = _Meta()
+
+#     # Synthetic data; IMPORTANT: y is a 1-D NumPy object array (no DataConversionWarning)
+#     monkeypatch.setattr(
+#         evaluate,
+#         "load_ptbxl_full",
+#         lambda *args, **kwargs: (
+#             torch.ones((12, 12, 100)).numpy(),
+#             np.array(["NORM"] * 6 + ["MI"] * 6, dtype=object),
+#             meta,
+#         ),
+#         raising=False,
+#     )
+
+#     # Don’t generate plots or read history in this test
+#     monkeypatch.setattr(
+#         evaluate, "evaluate_and_plot", lambda *args, **kwargs: None, raising=False
+#     )
+
+#     # Ensure our tiny model is used (rebind dicts so evaluate sees it)
+#     monkeypatch.setattr(
+#         models, "MODEL_CLASSES", {"ECGResNet": _TinyLogitModel}, raising=False
+#     )
+#     monkeypatch.setattr(
+#         evaluate, "MODEL_CLASSES", {"ECGResNet": _TinyLogitModel}, raising=False
+#     )
+
+#     # Stub torch.load and create the weights file it looks for
+#     (tmp_path / "mock.pt").write_bytes(b"")
+#     monkeypatch.setattr("torch.load", lambda *a, **k: {}, raising=False)
+
+#     # Silence metric warnings by patching the names evaluate actually calls
+#     monkeypatch.setattr(
+#         evaluate,
+#         "precision_recall_fscore_support",
+#         lambda *a, **k: ([0.0], [0.0], [0.0], [0]),
+#         raising=False,
+#     )
+#     monkeypatch.setattr(
+#         evaluate,
+#         "classification_report",
+#         lambda *a, **k: "ok",
+#         raising=False,
+#     )
+
+#     # make sklearn see a true 1-D ndarray for y in this test (kills DataConversionWarning)
+#     monkeypatch.setattr(
+#         "sklearn.preprocessing._label.column_or_1d",
+#         lambda y, warn=True: (
+#             y.ravel()
+#             if hasattr(y, "ravel")
+#             else np.asarray(
+#                 [
+#                     (v[0] if isinstance(v, (list, tuple)) and len(v) == 1 else v)
+#                     for v in y
+#                 ],
+#                 dtype=object,
+#             )
+#         ),
+#         raising=False,
+#     )
+
+#     # Call main with string values for shap_* overrides
+#     evaluate.main(
+#         shap_profile="custom",
+#         shap_n="12",
+#         shap_bg="6",
+#         shap_stride="3",
+#     )
+
+#     # Check that string inputs were parsed correctly
+#     assert saved_params["n"] == 12
+#     assert saved_params["bg"] == 6
+#     assert saved_params["stride"] == math.ceil(evaluate.dataset.tensors[0].shape[2] / 3)
+
+
+# def test_eval_shap_custom_profile_parses_ints(monkeypatch, tmp_path):
+#     """
+#     Covers: custom SHAP profile with string inputs (shap_n, shap_bg, shap_stride)
+
+#     Ensures that string arguments are correctly parsed as integers, and passed
+#     into SHAP routines. This covers the `int(...)` conversion logic when
+#     shap_profile == "custom".
+
+#     Expected behavior:
+#         - shap_n = "12" --> 12
+#         - shap_bg = "6" --> 6
+#         - shap_stride = "3" --> 3
+#     """
+
+#     # Track values passed into SHAP save
+#     saved_params = {}
+
+#     def mock_sample_background(X, max_background, seed):
+#         out = torch.ones((max_background, X.shape[1], X.shape[2]))
+#         saved_params["bg"] = out.shape[0]
+#         return out
+
+#     monkeypatch.setattr(evaluate, "shap_sample_background", mock_sample_background)
+#     monkeypatch.setattr(
+#         evaluate,
+#         "shap_compute_values",
+#         lambda model, x, bg, device=None: torch.ones(
+#             (x.shape[0], x.shape[1], x.shape[2])
+#         ),
+#     )
+#     monkeypatch.setattr(
+#         evaluate,
+#         "_shap_stability_report",
+#         lambda sv, class_names=None: "mock report",
+#     )
+
+#     def fake_save(sv, X, outdir, fname):
+#         saved_params["n"] = X.shape[0]
+#         saved_params["stride"] = X.shape[2]
+#         return "mock_output.png"
+
+#     monkeypatch.setattr(evaluate, "shap_save_channel_summary", fake_save)
+
+#     # Prepare minimal context used by evaluate.main
+#     evaluate.model = MagicMock()
+#     evaluate.model.eval = lambda: None
+#     evaluate.device = torch.device("cpu")
+#     evaluate.dataset = TensorDataset(
+#         torch.ones((12, 12, 100)), torch.zeros(12, dtype=torch.long)
+#     )
+#     evaluate.config = SimpleNamespace(model="ECGResNet", batch_size=4)
+#     evaluate.tag = "t"
+#     evaluate.best_fold = 1
+#     evaluate.best_epoch = 3
+#     evaluate.OUTPUT_DIR = tmp_path
+#     evaluate.SEED = 0
+
+#     # No CUDA
+#     monkeypatch.setattr("torch.cuda.is_available", lambda: False)
+
+#     # Tiny real-looking YAML so main() reads a config and sees a tag
+#     dummy_config_path = tmp_path / "config_t.yaml"
+#     dummy_config_path.write_text(
+#         "model: ECGResNet\n"
+#         "batch_size: 4\n"
+#         "lr: 0.001\n"
+#         "weight_decay: 0.0\n"
+#         "n_epochs: 1\n"
+#         "save_best: true\n"
+#         "sample_only: false\n"
+#         "subsample_frac: 1.0\n"
+#         "sampling_rate: 100\n"
+#         "tag: t\n"
+#     )
+#     monkeypatch.setattr(evaluate, "RESULTS_DIR", tmp_path)
+#     monkeypatch.setattr(evaluate, "_latest_config_path", lambda: dummy_config_path)
+
+#     # Pretend there’s a summary for this tag
+#     monkeypatch.setattr(
+#         evaluate,
+#         "_read_summary",
+#         lambda tag: [
+#             {
+#                 "model_path": str(tmp_path / "mock.pt"),
+#                 "best_epoch": 3,
+#                 "loss": 0.1,
+#                 "val_acc": 0.9,
+#                 "fold": 1,
+#             }
+#         ],
+#         raising=False,
+#     )
+
+#     # Make best-entry selection trivial
+#     monkeypatch.setattr(
+#         evaluate,
+#         "_select_best_entry",
+#         lambda summaries, fold_override=None: summaries[0],
+#         raising=False,
+#     )
+
+#     # Minimal meta supporting meta.loc[mask].reset_index(...)
+#     class _Meta:
+#         @property
+#         def loc(self):
+#             return self
+
+#         def __getitem__(self, key):
+#             return self
+
+#         def reset_index(self, drop=False):
+#             return self
+
+#     meta = _Meta()
+
+#     # Synthetic data; IMPORTANT: y is a 1-D NumPy object array (no DataConversionWarning)
+#     monkeypatch.setattr(
+#         evaluate,
+#         "load_ptbxl_full",
+#         lambda *args, **kwargs: (
+#             torch.ones((12, 12, 100)).numpy(),
+#             np.array(["NORM"] * 6 + ["MI"] * 6, dtype=object),
+#             meta,
+#         ),
+#         raising=False,
+#     )
+
+#     # Don’t generate plots or read history in this test
+#     monkeypatch.setattr(
+#         evaluate, "evaluate_and_plot", lambda *args, **kwargs: None, raising=False
+#     )
+
+#     # Ensure our tiny model is used (rebind dicts so evaluate sees it)
+#     monkeypatch.setattr(
+#         models, "MODEL_CLASSES", {"ECGResNet": _TinyLogitModel}, raising=False
+#     )
+#     monkeypatch.setattr(
+#         evaluate, "MODEL_CLASSES", {"ECGResNet": _TinyLogitModel}, raising=False
+#     )
+
+#     # Stub torch.load and create the weights file it looks for
+#     (tmp_path / "mock.pt").write_bytes(b"")
+#     monkeypatch.setattr("torch.load", lambda *a, **k: {}, raising=False)
+
+#     # IMPORTANT: keep sklearn out of report generation in this SHAP test
+#     # (no imports in tests; use string target)
+#     monkeypatch.setattr(
+#         "ecg_cnn.utils.plot_utils.save_classification_report_csv",
+#         lambda *a, **k: None,
+#         raising=False,
+#     )
+
+#     # Call main with string values for shap_* overrides
+#     evaluate.main(
+#         shap_profile="custom",
+#         shap_n="12",
+#         shap_bg="6",
+#         shap_stride="3",
+#     )
+
+#     # Check that string inputs were parsed correctly
+#     assert saved_params["n"] == 12
+#     assert saved_params["bg"] == 6
+#     assert saved_params["stride"] == math.ceil(evaluate.dataset.tensors[0].shape[2] / 3)
+
+
+# def test_eval_shap_custom_profile_parses_ints(monkeypatch, tmp_path):
+#     """
+#     Covers: custom SHAP profile with string inputs (shap_n, shap_bg, shap_stride)
+
+#     Ensures that string arguments are correctly parsed as integers, and passed
+#     into SHAP routines. This covers the `int(...)` conversion logic when
+#     shap_profile == "custom".
+
+#     Expected behavior:
+#         - shap_n = "12" --> 12
+#         - shap_bg = "6" --> 6
+#         - shap_stride = "3" --> 3
+#     """
+
+#     # Track values passed into SHAP save
+#     saved_params = {}
+
+#     def mock_sample_background(X, max_background, seed):
+#         out = torch.ones((max_background, X.shape[1], X.shape[2]))
+#         saved_params["bg"] = out.shape[0]
+#         return out
+
+#     monkeypatch.setattr(evaluate, "shap_sample_background", mock_sample_background)
+#     monkeypatch.setattr(
+#         evaluate,
+#         "shap_compute_values",
+#         lambda model, x, bg, device=None: torch.ones(
+#             (x.shape[0], x.shape[1], x.shape[2])
+#         ),
+#     )
+#     monkeypatch.setattr(
+#         evaluate,
+#         "_shap_stability_report",
+#         lambda sv, class_names=None: "mock report",
+#     )
+
+#     # --- Silence scikit-learn "column-vector y" warning for this test ---
+#     def _squash_and_quiet(y, warn=True):
+#         try:
+#             return y.ravel()
+#         except Exception:
+#             return y
+
+#     monkeypatch.setattr(
+#         "sklearn.preprocessing._label.column_or_1d",
+#         _squash_and_quiet,
+#         raising=False,
+#     )
+#     # --------------------------------------------------------------------
+
+#     def fake_save(sv, X, outdir, fname):
+#         saved_params["n"] = X.shape[0]
+#         saved_params["stride"] = X.shape[2]
+#         return "mock_output.png"
+
+#     monkeypatch.setattr(evaluate, "shap_save_channel_summary", fake_save)
+
+#     # Prepare minimal context used by evaluate.main
+#     evaluate.model = MagicMock()
+#     evaluate.model.eval = lambda: None
+#     evaluate.device = torch.device("cpu")
+#     evaluate.dataset = TensorDataset(
+#         torch.ones((12, 12, 100)), torch.zeros(12, dtype=torch.long)
+#     )
+#     evaluate.config = SimpleNamespace(model="ECGResNet", batch_size=4)
+#     evaluate.tag = "t"
+#     evaluate.best_fold = 1
+#     evaluate.best_epoch = 3
+#     evaluate.OUTPUT_DIR = tmp_path
+#     evaluate.SEED = 0
+
+#     # No CUDA
+#     monkeypatch.setattr("torch.cuda.is_available", lambda: False)
+
+#     # Tiny real-looking YAML so main() reads a config and sees a tag
+#     dummy_config_path = tmp_path / "config_t.yaml"
+#     dummy_config_path.write_text(
+#         "model: ECGResNet\n"
+#         "batch_size: 4\n"
+#         "lr: 0.001\n"
+#         "weight_decay: 0.0\n"
+#         "n_epochs: 1\n"
+#         "save_best: true\n"
+#         "sample_only: false\n"
+#         "subsample_frac: 1.0\n"
+#         "sampling_rate: 100\n"
+#         "tag: t\n"
+#     )
+#     monkeypatch.setattr(evaluate, "RESULTS_DIR", tmp_path)
+#     monkeypatch.setattr(evaluate, "_latest_config_path", lambda: dummy_config_path)
+
+#     # Pretend there’s a summary for this tag
+#     monkeypatch.setattr(
+#         evaluate,
+#         "_read_summary",
+#         lambda tag: [
+#             {
+#                 "model_path": str(tmp_path / "mock.pt"),
+#                 "best_epoch": 3,
+#                 "loss": 0.1,
+#                 "val_acc": 0.9,
+#                 "fold": 1,
+#             }
+#         ],
+#         raising=False,
+#     )
+
+#     # Make best-entry selection trivial
+#     monkeypatch.setattr(
+#         evaluate,
+#         "_select_best_entry",
+#         lambda summaries, fold_override=None: summaries[0],
+#         raising=False,
+#     )
+
+#     # Minimal meta supporting meta.loc[mask].reset_index(...)
+#     class _Meta:
+#         @property
+#         def loc(self):
+#             return self
+
+#         def __getitem__(self, key):
+#             return self
+
+#         def reset_index(self, drop=False):
+#             return self
+
+#     meta = _Meta()
+
+#     # Synthetic data; IMPORTANT: y is a 1-D NumPy object array (no DataConversionWarning)
+#     monkeypatch.setattr(
+#         evaluate,
+#         "load_ptbxl_full",
+#         lambda *args, **kwargs: (
+#             torch.ones((12, 12, 100)).numpy(),
+#             np.array(["NORM"] * 6 + ["MI"] * 6, dtype=object),
+#             meta,
+#         ),
+#         raising=False,
+#     )
+
+#     # Don’t generate plots or read history in this test
+#     monkeypatch.setattr(
+#         evaluate, "evaluate_and_plot", lambda *args, **kwargs: None, raising=False
+#     )
+
+#     # Ensure our tiny model is used (rebind dicts so evaluate sees it)
+#     monkeypatch.setattr(
+#         models, "MODEL_CLASSES", {"ECGResNet": _TinyLogitModel}, raising=False
+#     )
+#     monkeypatch.setattr(
+#         evaluate, "MODEL_CLASSES", {"ECGResNet": _TinyLogitModel}, raising=False
+#     )
+
+#     # Stub torch.load and create the weights file it looks for
+#     (tmp_path / "mock.pt").write_bytes(b"")
+#     monkeypatch.setattr("torch.load", lambda *a, **k: {}, raising=False)
+
+#     # IMPORTANT: keep sklearn out of report generation in this SHAP test
+#     monkeypatch.setattr(
+#         "ecg_cnn.utils.plot_utils.save_classification_report_csv",
+#         lambda *a, **k: None,
+#         raising=False,
+#     )
+
+#     # Call main with string values for shap_* overrides
+#     evaluate.main(
+#         shap_profile="custom",
+#         shap_n="12",
+#         shap_bg="6",
+#         shap_stride="3",
+#     )
+
+#     # Check that string inputs were parsed correctly
+#     assert saved_params["n"] == 12
+#     assert saved_params["bg"] == 6
+#     assert saved_params["stride"] == math.ceil(evaluate.dataset.tensors[0].shape[2] / 3)
+
+
+# def test_eval_shap_custom_profile_parses_ints(monkeypatch, tmp_path):
+#     """
+#     Covers: custom SHAP profile with string inputs (shap_n, shap_bg, shap_stride)
+
+#     Ensures that string arguments are correctly parsed as integers, and passed
+#     into SHAP routines. This covers the `int(...)` conversion logic when
+#     shap_profile == "custom".
+
+#     Expected behavior:
+#         - shap_n = "12" --> 12
+#         - shap_bg = "6" --> 6
+#         - shap_stride = "3" --> 3
+#     """
+
+#     # Track values passed into SHAP save
+#     saved_params = {}
+
+#     def mock_sample_background(X, max_background, seed):
+#         out = torch.ones((max_background, X.shape[1], X.shape[2]))
+#         saved_params["bg"] = out.shape[0]
+#         return out
+
+#     monkeypatch.setattr(evaluate, "shap_sample_background", mock_sample_background)
+#     monkeypatch.setattr(
+#         evaluate,
+#         "shap_compute_values",
+#         lambda model, x, bg, device=None: torch.ones(
+#             (x.shape[0], x.shape[1], x.shape[2])
+#         ),
+#     )
+#     monkeypatch.setattr(
+#         evaluate,
+#         "_shap_stability_report",
+#         lambda sv, class_names=None: "mock report",
+#     )
+
+#     # --- Silence scikit-learn "column-vector y" warning for this test ---
+#     # Always return a 1-D NumPy array to satisfy downstream `.dtype` checks.
+#     def _squash_and_quiet(y, warn=True):
+#         try:
+#             return np.asarray(y).ravel()
+#         except Exception:
+#             try:
+#                 return y.ravel()
+#             except Exception:
+#                 # Last resort: wrap in a 1-D object array
+#                 return np.asarray(list(y)).ravel()
+
+#     monkeypatch.setattr(
+#         "sklearn.preprocessing._label.column_or_1d",
+#         _squash_and_quiet,
+#         raising=False,
+#     )
+#     # --------------------------------------------------------------------
+
+#     def fake_save(sv, X, outdir, fname):
+#         saved_params["n"] = X.shape[0]
+#         saved_params["stride"] = X.shape[2]
+#         return "mock_output.png"
+
+#     monkeypatch.setattr(evaluate, "shap_save_channel_summary", fake_save)
+
+#     # Prepare minimal context used by evaluate.main
+#     evaluate.model = MagicMock()
+#     evaluate.model.eval = lambda: None
+#     evaluate.device = torch.device("cpu")
+#     evaluate.dataset = TensorDataset(
+#         torch.ones((12, 12, 100)), torch.zeros(12, dtype=torch.long)
+#     )
+#     evaluate.config = SimpleNamespace(model="ECGResNet", batch_size=4)
+#     evaluate.tag = "t"
+#     evaluate.best_fold = 1
+#     evaluate.best_epoch = 3
+#     evaluate.OUTPUT_DIR = tmp_path
+#     evaluate.SEED = 0
+
+#     # No CUDA
+#     monkeypatch.setattr("torch.cuda.is_available", lambda: False)
+
+#     # Tiny real-looking YAML so main() reads a config and sees a tag
+#     dummy_config_path = tmp_path / "config_t.yaml"
+#     dummy_config_path.write_text(
+#         "model: ECGResNet\n"
+#         "batch_size: 4\n"
+#         "lr: 0.001\n"
+#         "weight_decay: 0.0\n"
+#         "n_epochs: 1\n"
+#         "save_best: true\n"
+#         "sample_only: false\n"
+#         "subsample_frac: 1.0\n"
+#         "sampling_rate: 100\n"
+#         "tag: t\n"
+#     )
+#     monkeypatch.setattr(evaluate, "RESULTS_DIR", tmp_path)
+#     monkeypatch.setattr(evaluate, "_latest_config_path", lambda: dummy_config_path)
+
+#     # Pretend there’s a summary for this tag
+#     monkeypatch.setattr(
+#         evaluate,
+#         "_read_summary",
+#         lambda tag: [
+#             {
+#                 "model_path": str(tmp_path / "mock.pt"),
+#                 "best_epoch": 3,
+#                 "loss": 0.1,
+#                 "val_acc": 0.9,
+#                 "fold": 1,
+#             }
+#         ],
+#         raising=False,
+#     )
+
+#     # Make best-entry selection trivial
+#     monkeypatch.setattr(
+#         evaluate,
+#         "_select_best_entry",
+#         lambda summaries, fold_override=None: summaries[0],
+#         raising=False,
+#     )
+
+#     # Minimal meta supporting meta.loc[mask].reset_index(...)
+#     class _Meta:
+#         @property
+#         def loc(self):
+#             return self
+
+#         def __getitem__(self, key):
+#             return self
+
+#         def reset_index(self, drop=False):
+#             return self
+
+#     meta = _Meta()
+
+#     # Synthetic data; IMPORTANT: y is a 1-D NumPy object array (no DataConversionWarning)
+#     monkeypatch.setattr(
+#         evaluate,
+#         "load_ptbxl_full",
+#         lambda *args, **kwargs: (
+#             torch.ones((12, 12, 100)).numpy(),
+#             np.array(["NORM"] * 6 + ["MI"] * 6, dtype=object),
+#             meta,
+#         ),
+#         raising=False,
+#     )
+
+#     # Don’t generate plots or read history in this test
+#     monkeypatch.setattr(
+#         evaluate, "evaluate_and_plot", lambda *args, **kwargs: None, raising=False
+#     )
+
+#     # Ensure our tiny model is used (rebind dicts so evaluate sees it)
+#     monkeypatch.setattr(
+#         models, "MODEL_CLASSES", {"ECGResNet": _TinyLogitModel}, raising=False
+#     )
+#     monkeypatch.setattr(
+#         evaluate, "MODEL_CLASSES", {"ECGResNet": _TinyLogitModel}, raising=False
+#     )
+
+#     # Stub torch.load and create the weights file it looks for
+#     (tmp_path / "mock.pt").write_bytes(b"")
+#     monkeypatch.setattr("torch.load", lambda *a, **k: {}, raising=False)
+
+#     # IMPORTANT: keep sklearn out of report generation in this SHAP test
+#     monkeypatch.setattr(
+#         "ecg_cnn.utils.plot_utils.save_classification_report_csv",
+#         lambda *a, **k: None,
+#         raising=False,
+#     )
+
+#     # Call main with string values for shap_* overrides
+#     evaluate.main(
+#         shap_profile="custom",
+#         shap_n="12",
+#         shap_bg="6",
+#         shap_stride="3",
+#     )
+
+#     # Check that string inputs were parsed correctly
+#     assert saved_params["n"] == 12
+#     assert saved_params["bg"] == 6
+#     assert saved_params["stride"] == math.ceil(evaluate.dataset.tensors[0].shape[2] / 3)
+
+
+# def test_eval_shap_custom_profile_parses_ints(monkeypatch, tmp_path):
+#     """
+#     Covers: custom SHAP profile with string inputs (shap_n, shap_bg, shap_stride)
+
+#     Ensures that string arguments are correctly parsed as integers, and passed
+#     into SHAP routines. This covers the `int(...)` conversion logic when
+#     shap_profile == "custom".
+
+#     Expected behavior:
+#         - shap_n = "12" --> 12
+#         - shap_bg = "6" --> 6
+#         - shap_stride = "3" --> 3
+#     """
+
+#     # Track values passed into SHAP save
+#     saved_params = {}
+
+#     def mock_sample_background(X, max_background, seed):
+#         out = torch.ones((max_background, X.shape[1], X.shape[2]))
+#         saved_params["bg"] = out.shape[0]
+#         return out
+
+#     monkeypatch.setattr(evaluate, "shap_sample_background", mock_sample_background)
+#     monkeypatch.setattr(
+#         evaluate,
+#         "shap_compute_values",
+#         lambda model, x, bg, device=None: torch.ones(
+#             (x.shape[0], x.shape[1], x.shape[2])
+#         ),
+#     )
+#     monkeypatch.setattr(
+#         evaluate,
+#         "_shap_stability_report",
+#         lambda sv, class_names=None: "mock report",
+#     )
+
+#     # --- Silence scikit-learn "column-vector y" warning for this test ---
+#     # Must accept dtype and warn to match sklearn's call signature.
+#     def _squash_and_quiet(y, dtype=None, warn=True):
+#         return np.asarray(y, dtype=dtype).ravel()
+
+#     monkeypatch.setattr(
+#         "sklearn.preprocessing._label.column_or_1d",
+#         _squash_and_quiet,
+#         raising=False,
+#     )
+#     # --------------------------------------------------------------------
+
+#     def fake_save(sv, X, outdir, fname):
+#         saved_params["n"] = X.shape[0]
+#         saved_params["stride"] = X.shape[2]
+#         return "mock_output.png"
+
+#     monkeypatch.setattr(evaluate, "shap_save_channel_summary", fake_save)
+
+#     # Prepare minimal context used by evaluate.main
+#     evaluate.model = MagicMock()
+#     evaluate.model.eval = lambda: None
+#     evaluate.device = torch.device("cpu")
+#     evaluate.dataset = TensorDataset(
+#         torch.ones((12, 12, 100)), torch.zeros(12, dtype=torch.long)
+#     )
+#     evaluate.config = SimpleNamespace(model="ECGResNet", batch_size=4)
+#     evaluate.tag = "t"
+#     evaluate.best_fold = 1
+#     evaluate.best_epoch = 3
+#     evaluate.OUTPUT_DIR = tmp_path
+#     evaluate.SEED = 0
+
+#     # No CUDA
+#     monkeypatch.setattr("torch.cuda.is_available", lambda: False)
+
+#     # Tiny real-looking YAML so main() reads a config and sees a tag
+#     dummy_config_path = tmp_path / "config_t.yaml"
+#     dummy_config_path.write_text(
+#         "model: ECGResNet\n"
+#         "batch_size: 4\n"
+#         "lr: 0.001\n"
+#         "weight_decay: 0.0\n"
+#         "n_epochs: 1\n"
+#         "save_best: true\n"
+#         "sample_only: false\n"
+#         "subsample_frac: 1.0\n"
+#         "sampling_rate: 100\n"
+#         "tag: t\n"
+#     )
+#     monkeypatch.setattr(evaluate, "RESULTS_DIR", tmp_path)
+#     monkeypatch.setattr(evaluate, "_latest_config_path", lambda: dummy_config_path)
+
+#     # Pretend there’s a summary for this tag
+#     monkeypatch.setattr(
+#         evaluate,
+#         "_read_summary",
+#         lambda tag: [
+#             {
+#                 "model_path": str(tmp_path / "mock.pt"),
+#                 "best_epoch": 3,
+#                 "loss": 0.1,
+#                 "val_acc": 0.9,
+#                 "fold": 1,
+#             }
+#         ],
+#         raising=False,
+#     )
+
+#     # Make best-entry selection trivial
+#     monkeypatch.setattr(
+#         evaluate,
+#         "_select_best_entry",
+#         lambda summaries, fold_override=None: summaries[0],
+#         raising=False,
+#     )
+
+#     # Minimal meta supporting meta.loc[mask].reset_index(...)
+#     class _Meta:
+#         @property
+#         def loc(self):
+#             return self
+
+#         def __getitem__(self, key):
+#             return self
+
+#         def reset_index(self, drop=False):
+#             return self
+
+#     meta = _Meta()
+
+#     # Synthetic data; IMPORTANT: y is a 1-D NumPy object array (no DataConversionWarning)
+#     monkeypatch.setattr(
+#         evaluate,
+#         "load_ptbxl_full",
+#         lambda *args, **kwargs: (
+#             torch.ones((12, 12, 100)).numpy(),
+#             np.array(["NORM"] * 6 + ["MI"] * 6, dtype=object),
+#             meta,
+#         ),
+#         raising=False,
+#     )
+
+#     # Don’t generate plots or read history in this test
+#     monkeypatch.setattr(
+#         evaluate, "evaluate_and_plot", lambda *args, **kwargs: None, raising=False
+#     )
+
+#     # Ensure our tiny model is used (rebind dicts so evaluate sees it)
+#     monkeypatch.setattr(
+#         models, "MODEL_CLASSES", {"ECGResNet": _TinyLogitModel}, raising=False
+#     )
+#     monkeypatch.setattr(
+#         evaluate, "MODEL_CLASSES", {"ECGResNet": _TinyLogitModel}, raising=False
+#     )
+
+#     # Stub torch.load and create the weights file it looks for
+#     (tmp_path / "mock.pt").write_bytes(b"")
+#     monkeypatch.setattr("torch.load", lambda *a, **k: {}, raising=False)
+
+#     # IMPORTANT: keep sklearn out of report generation in this SHAP test
+#     monkeypatch.setattr(
+#         "ecg_cnn.utils.plot_utils.save_classification_report_csv",
+#         lambda *a, **k: None,
+#         raising=False,
+#     )
+
+#     # Call main with string values for shap_* overrides
+#     evaluate.main(
+#         shap_profile="custom",
+#         shap_n="12",
+#         shap_bg="6",
+#         shap_stride="3",
+#     )
+
+#     # Check that string inputs were parsed correctly
+#     assert saved_params["n"] == 12
+#     assert saved_params["bg"] == 6
+#     assert saved_params["stride"] == math.ceil(evaluate.dataset.tensors[0].shape[2] / 3)
+
+
 def test_eval_shap_custom_profile_parses_ints(monkeypatch, tmp_path):
     """
     Covers: custom SHAP profile with string inputs (shap_n, shap_bg, shap_stride)
@@ -2944,7 +5113,7 @@ def test_eval_shap_custom_profile_parses_ints(monkeypatch, tmp_path):
 
     monkeypatch.setattr(evaluate, "shap_save_channel_summary", fake_save)
 
-    # Prepare minimal context
+    # Prepare minimal context used by evaluate.main
     evaluate.model = MagicMock()
     evaluate.model.eval = lambda: None
     evaluate.device = torch.device("cpu")
@@ -2958,11 +5127,11 @@ def test_eval_shap_custom_profile_parses_ints(monkeypatch, tmp_path):
     evaluate.OUTPUT_DIR = tmp_path
     evaluate.SEED = 0
 
-    # Patch torch.cuda and config loader
+    # No CUDA
     monkeypatch.setattr("torch.cuda.is_available", lambda: False)
 
+    # Tiny real-looking YAML so main() reads a config and sees a tag
     dummy_config_path = tmp_path / "config_t.yaml"
-    # dummy_config_path.write_text("model: MockNet\nbatch_size: 4\n")
     dummy_config_path.write_text(
         "model: ECGResNet\n"
         "batch_size: 4\n"
@@ -2973,33 +5142,12 @@ def test_eval_shap_custom_profile_parses_ints(monkeypatch, tmp_path):
         "sample_only: false\n"
         "subsample_frac: 1.0\n"
         "sampling_rate: 100\n"
+        "tag: t\n"
     )
     monkeypatch.setattr(evaluate, "RESULTS_DIR", tmp_path)
     monkeypatch.setattr(evaluate, "_latest_config_path", lambda: dummy_config_path)
 
-    # Ensure evaluate.main() gets a tag + fold without touching TrainConfig
-    def _fake_load_config_and_extras(path, fold_override):
-        cfg = SimpleNamespace(
-            model="ECGResNet",
-            batch_size=4,
-            lr=0.001,
-            weight_decay=0.0,
-            n_epochs=1,
-            save_best=True,
-            sample_only=False,
-            subsample_frac=1.0,
-            sampling_rate=100,
-            data_dir=None,
-            sample_dir=None,
-        )
-        extras = {"tag": "t", "fold": 1, "config": str(path)}
-        return cfg, extras
-
-    monkeypatch.setattr(
-        evaluate, "_load_config_and_extras", _fake_load_config_and_extras
-    )
-
-    # Avoid touching the filesystem: pretend there is a summary for this tag
+    # Pretend there’s a summary for this tag
     monkeypatch.setattr(
         evaluate,
         "_read_summary",
@@ -3009,14 +5157,13 @@ def test_eval_shap_custom_profile_parses_ints(monkeypatch, tmp_path):
                 "best_epoch": 3,
                 "loss": 0.1,
                 "val_acc": 0.9,
-                # include fold if your code branches on it; harmless otherwise
                 "fold": 1,
             }
         ],
         raising=False,
     )
 
-    # NOTE: evaluate.main() calls _select_best_entry (not _choose_best_entry)
+    # Make best-entry selection trivial
     monkeypatch.setattr(
         evaluate,
         "_select_best_entry",
@@ -3024,79 +5171,55 @@ def test_eval_shap_custom_profile_parses_ints(monkeypatch, tmp_path):
         raising=False,
     )
 
-    # Force main() to use a tiny synthetic dataset instead of loading PTB-XL
-    class _DummyMeta:
-        def __init__(self, n):
-            self._n = n
-
+    # Minimal meta supporting meta.loc[mask].reset_index(...)
+    class _Meta:
         @property
         def loc(self):
             return self
 
         def __getitem__(self, key):
-            # support boolean mask indexing by returning self
             return self
 
         def reset_index(self, drop=False):
             return self
 
-    def _fake_load_ptbxl_full(
-        data_dir=None,
-        sample_dir=None,
-        sampling_rate=None,
-        subsample_frac=None,
-        **_,
-    ):
-        X = torch.ones((12, 12, 100)).numpy()
-        y = ["NORM"] * 6 + ["MI"] * 6
-        meta = _DummyMeta(12)
-        return X, y, meta
+    meta = _Meta()
 
-    monkeypatch.setattr(
-        evaluate, "load_ptbxl_full", _fake_load_ptbxl_full, raising=False
-    )
-
-    # Don’t generate plots or read history; just no-op
+    # Synthetic data; IMPORTANT: y is a 1-D NumPy object array (no DataConversionWarning)
     monkeypatch.setattr(
         evaluate,
-        "evaluate_and_plot",
-        lambda *args, **kwargs: None,
+        "load_ptbxl_full",
+        lambda *args, **kwargs: (
+            torch.ones((12, 12, 100)).numpy(),
+            np.array(["NORM"] * 6 + ["MI"] * 6, dtype=object),
+            meta,
+        ),
         raising=False,
     )
 
-    # Replace the real model factory under the same key the config uses
-    monkeypatch.setitem(
-        evaluate.MODEL_CLASSES,
-        "ECGResNet",
-        lambda num_classes, **kw: _TinyLogitModel(num_classes=num_classes, **kw),
+    # Don’t generate plots or read history in this test
+    monkeypatch.setattr(
+        evaluate, "evaluate_and_plot", lambda *args, **kwargs: None, raising=False
     )
 
-    # Keep the test hermetic: create the weights file and stub torch.load
-    (tmp_path / "mock.pt").write_bytes(b"")  # satisfy Path.exists()
+    # Ensure our tiny model is used (rebind dicts so evaluate sees it)
+    monkeypatch.setattr(
+        models, "MODEL_CLASSES", {"ECGResNet": _TinyLogitModel}, raising=False
+    )
+    monkeypatch.setattr(
+        evaluate, "MODEL_CLASSES", {"ECGResNet": _TinyLogitModel}, raising=False
+    )
+
+    # Stub torch.load and create the weights file it looks for
+    (tmp_path / "mock.pt").write_bytes(b"")
     monkeypatch.setattr("torch.load", lambda *a, **k: {}, raising=False)
 
-    # Patch the registry in BOTH modules to avoid import-time aliasing issues
-    monkeypatch.setitem(
-        models.MODEL_CLASSES,
-        "ECGResNet",
-        lambda num_classes, **kw: _TinyLogitModel(num_classes=num_classes, **kw),
-    )
-    monkeypatch.setitem(
-        evaluate.MODEL_CLASSES,
-        "ECGResNet",
-        lambda num_classes, **kw: _TinyLogitModel(num_classes=num_classes, **kw),
-    )
-
-    # Build a fresh registry that definitely contains our dummy model
-    def _ecg_resnet_factory(num_classes, **kw):
-        return _TinyLogitModel(num_classes=num_classes, **kw)
-
-    # Rebind the dict in BOTH modules so aliasing/order can’t bite us
+    # IMPORTANT: keep sklearn out of report generation in this SHAP test
+    # (no imports in tests; use string target)
     monkeypatch.setattr(
-        models, "MODEL_CLASSES", {"ECGResNet": _ecg_resnet_factory}, raising=False
-    )
-    monkeypatch.setattr(
-        evaluate, "MODEL_CLASSES", {"ECGResNet": _ecg_resnet_factory}, raising=False
+        "ecg_cnn.utils.plot_utils.save_classification_report_csv",
+        lambda *a, **k: None,
+        raising=False,
     )
 
     # Call main with string values for shap_* overrides
@@ -3111,7 +5234,6 @@ def test_eval_shap_custom_profile_parses_ints(monkeypatch, tmp_path):
     assert saved_params["n"] == 12
     assert saved_params["bg"] == 6
     assert saved_params["stride"] == math.ceil(evaluate.dataset.tensors[0].shape[2] / 3)
-    # assert saved_params["stride"] == 100 // 3
 
 
 def test_eval_shap_profile_falls_back_to_medium(monkeypatch, tmp_path, capsys):

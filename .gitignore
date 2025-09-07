@@ -35,5 +35,3 @@ outputs/
 data/larger_sample/
 data/ptbxl/
 
-# Getting rid of files in git history
-git rm --cached ecg_cnn/train_ecg_cnn_ptbxl.py

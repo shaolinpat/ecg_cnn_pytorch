@@ -47,7 +47,8 @@ import time
 import torch
 import torch.nn as nn
 from pathlib import Path
-from sklearn.preprocessing import LabelEncoder
+
+# from sklearn.preprocessing import LabelEncoder
 from torch.utils.data import TensorDataset, DataLoader
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -77,6 +78,8 @@ from ecg_cnn.utils.plot_utils import (
     save_classification_report_csv,
     save_fold_summary_csv,
 )
+
+print(">>> USING LOCAL ecg_cnn.evaluate FROM:", __file__)
 
 # ------------------------------------------------------------------------------
 # Globals
@@ -349,6 +352,56 @@ def _resolve_ovr_flags(
     return enable_ovr, (set(ovr_classes) if ovr_classes else None)
 
 
+def _as_1d_label_list(y):
+    """
+    Normalize labels to a flat 1-D list of scalars suitable for scikit-learn.
+
+    Parameters
+    ----------
+    y : array-like
+        Input labels. May be a Python list, NumPy array, Pandas Series, or a
+        nested structure such as a list of 1-element arrays.
+
+    Returns
+    -------
+    list
+        A Python list of scalar values with shape (n,).
+
+    Raises
+    ------
+    ValueError
+        If the input cannot be reshaped into a 1-D sequence of scalars.
+    """
+    arr = np.asarray(y, dtype=object)
+
+    # Handle column vectors (n,1) by flattening
+    if arr.ndim == 2 and arr.shape[1] == 1:
+        arr = arr.reshape(-1)
+
+    # Fallback: squeeze any singleton dimensions
+    elif arr.ndim > 1:
+        arr = np.squeeze(arr)
+
+    # Final check: must be 1-D
+    if arr.ndim != 1:
+        raise ValueError(
+            f"Expected labels to be 1-D after normalization, got shape {arr.shape}"
+        )
+
+    # Convert to list of scalars (unwrap 1-element containers)
+    out = []
+    for item in arr:
+        if isinstance(item, (list, np.ndarray)):
+            x = np.asarray(item, dtype=object).reshape(-1)
+            if x.size == 0:
+                raise ValueError("Encountered empty label container")
+            out.append(x[0])
+        else:
+            out.append(item)
+
+    return out
+
+
 # ------------------------------------------------------------------------------
 # SHAP stability/uncertainty report (validated; no imports inside functions)
 # ------------------------------------------------------------------------------
@@ -501,6 +554,7 @@ def main(
         FileNotFoundError / ValueError on missing/malformed artifacts.
     """
     start_time = time.time()  # <— job timer (don’t shadow this)
+    print(">>> USING LOCAL ecg_cnn.evaluate FROM main():", __file__)
 
     # --- normalize args into a single Namespace ---
     if parsed_args is not None:
@@ -594,26 +648,59 @@ def main(
                 sample_only=True,
             )
 
-    # print("Loading data for evaluation...")
-    # X, y, meta = load_ptbxl_full(
-    #     data_dir=PTBXL_DATA_DIR,
-    #     subsample_frac=config.subsample_frac,
-    #     sampling_rate=config.sampling_rate,
-    # )
+    # # Filter unknown labels with y normalized to 1-D
+    # y_arr = np.asarray(y).reshape(-1)  # ensure shape (n,)
+    # keep = y_arr != "Unknown"
 
-    # Filter unknown labels
-    keep = np.array([lbl != "Unknown" for lbl in y], dtype=bool)
+    # Filter unknown labels and normalize y to a flat 1-D list of scalars
+    y_list = _as_1d_label_list(y)  # guarantees plain scalars in a 1-D sequence
+    y_arr = np.asarray(y_list, dtype=object)
+    keep = y_arr != "Unknown"
+
     X = X[keep]
-    y = [lbl for i, lbl in enumerate(y) if keep[i]]
+    y_list = y_arr[keep].tolist()  # still a flat 1-D list of scalars
     meta = meta.loc[keep].reset_index(drop=True)
 
-    # Encode labels to integers
-    le = LabelEncoder()
-    y_encoded = le.fit_transform(y)
-    y_tensor = torch.tensor(y_encoded).long()
-    X_tensor = torch.tensor(X).float()
+    # Encode labels to integers (sklearn-free; prevents column-vector warnings)
+    classes_, y_encoded = np.unique(
+        np.asarray(y_list, dtype=object), return_inverse=True
+    )
+    y_encoded = y_encoded.astype(int)
+
+    y_tensor = torch.tensor(y_encoded, dtype=torch.long).view(-1)
+    X_tensor = torch.tensor(X, dtype=torch.float32)
     dataset = TensorDataset(X_tensor, y_tensor)
     dataloader = DataLoader(dataset, batch_size=config.batch_size, shuffle=False)
+
+    # # Filter unknown labels and normalize y to a flat 1-D list of scalars
+    # y_list = _as_1d_label_list(y)  # <- guarantees shape semantics sklearn expects
+    # y_arr = np.asarray(y_list, dtype=object)
+    # keep = y_arr != "Unknown"
+
+    # X = X[keep]
+    # y_list = y_arr[keep].tolist()  # still flat 1-D list of scalars
+    # meta = meta.loc[keep].reset_index(drop=True)
+
+    # # Encode labels to integers (sklearn-free to avoid column-vector warnings)
+    # classes, y_encoded = np.unique(np.asarray(y), return_inverse=True)
+    # y_encoded = y_encoded.astype(int)
+
+    # # # Encode labels to integers
+    # # le = LabelEncoder()
+    # # y_encoded = le.fit_transform(y_list)  # <- no DataConversionWarning
+
+    # # X = X[keep]
+    # # y = y_arr[keep]  # stays 1-D, not (n,1)
+    # # meta = meta.loc[keep].reset_index(drop=True)
+
+    # # # Encode labels to integers
+    # # le = LabelEncoder()
+    # # y_encoded = le.fit_transform(y)
+
+    # y_tensor = torch.tensor(y_encoded).long()
+    # X_tensor = torch.tensor(X).float()
+    # dataset = TensorDataset(X_tensor, y_tensor)
+    # dataloader = DataLoader(dataset, batch_size=config.batch_size, shuffle=False)
 
     # Decide which run to evaluate based on --prefer
     best = None  # dict with keys like model, model_path, fold, best_epoch
