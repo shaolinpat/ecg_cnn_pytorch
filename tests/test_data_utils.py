@@ -1062,6 +1062,83 @@ def test_load_ptbxl_sample_adds_missing_superclass(tmp_path):
     assert len(meta) == len(X) == len(y)
 
 
+def test_load_ptbxl_sample_adds_superclass_when_missing_ptb_meta(tmp_path, monkeypatch):
+    """
+    Covers True branch at line ~593:
+    sample_meta lacks 'diagnostic_superclass' -> function must add it.
+    """
+    # sample_dir with one valid ECG CSV (shape (T,12) so it transposes to (12,T))
+    csv_path = tmp_path / "00001_lr_100hz.csv"
+    pd.DataFrame(np.ones((100, 12))).to_csv(csv_path, index=False, header=False)
+
+    # ptb_path must be a directory so we go past the early-return sample-only path
+    ptb_path = tmp_path / "ptb"
+    ptb_path.mkdir()
+
+    # Return PTB meta WITHOUT 'diagnostic_superclass' to trigger the add
+    def _fake_meta(_):
+        return pd.DataFrame(
+            {
+                "ecg_id": [1],
+                "filename_lr": [""],
+                "scp_codes": [{}],
+            }
+        ).set_index("ecg_id")
+
+    monkeypatch.setattr(
+        "ecg_cnn.data.data_utils.load_ptbxl_meta", _fake_meta, raising=False
+    )
+
+    X, y, meta = load_ptbxl_sample(
+        sample_dir=tmp_path, ptb_path=ptb_path, sample_only=False
+    )
+
+    assert isinstance(X, np.ndarray) and X.ndim == 3
+    assert isinstance(y, np.ndarray) and y.dtype == np.int64
+    # Key assertion: column was added
+    assert "diagnostic_superclass" in meta.columns
+    assert len(meta) == len(X) == len(y)
+
+
+def test_load_ptbxl_sample_keeps_existing_superclass_if_present(tmp_path, monkeypatch):
+    """
+    Covers False branch at line ~593:
+    sample_meta already has 'diagnostic_superclass' -> function should NOT add it.
+    """
+    # sample_dir with one valid ECG CSV
+    csv_path = tmp_path / "00002_lr_100hz.csv"
+    pd.DataFrame(np.ones((120, 12))).to_csv(csv_path, index=False, header=False)
+
+    # ptb_path is a directory so we run the main path (no early return)
+    ptb_path = tmp_path / "ptb_full"
+    ptb_path.mkdir()
+
+    # PTB meta WITH 'diagnostic_superclass' present
+    def _fake_meta(_):
+        return pd.DataFrame(
+            {
+                "ecg_id": [2],
+                "filename_lr": [""],
+                "scp_codes": [{}],
+                "diagnostic_superclass": ["NORM"],
+            }
+        ).set_index("ecg_id")
+
+    monkeypatch.setattr(
+        "ecg_cnn.data.data_utils.load_ptbxl_meta", _fake_meta, raising=False
+    )
+
+    X, y, meta = load_ptbxl_sample(
+        sample_dir=tmp_path, ptb_path=ptb_path, sample_only=False
+    )
+
+    assert isinstance(X, np.ndarray) and X.ndim == 3
+    assert isinstance(y, np.ndarray) and y.dtype == np.int64
+    # Key assertion: column was already there and remains
+    assert "diagnostic_superclass" in meta.columns
+    assert len(meta) == len(X) == len(y)
+
+
 # ------------------------------------------------------------------------------
 # def load_ptbxl_full(data_dir, subsample_frac, sampling_rate=100):
 # ------------------------------------------------------------------------------
