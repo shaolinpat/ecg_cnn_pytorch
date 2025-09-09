@@ -1036,6 +1036,32 @@ def test_sample_loader_no_round_robin_when_all_five_classes_present(tmp_path):
     assert set(y_int.tolist()) == set(range(5))
 
 
+def test_load_ptbxl_sample_adds_missing_superclass(tmp_path):
+    """
+    Covers: data_utils.load_ptbxl_sample line 593
+    Case where 'diagnostic_superclass' is missing in sample_meta,
+    so the function must insert it before returning.
+    """
+    # --- make a fake sample_dir with a minimal CSV (valid 12-lead shape) ---
+    csv_path = tmp_path / "00001_lr_100hz.csv"
+    # Shape (100, 12) -> will transpose to (12, 100)
+    df = pd.DataFrame(np.ones((100, 12)))
+    df.to_csv(csv_path, index=False, header=False)
+
+    # --- also create a dummy ptb_path that isn't a dir, so sample_mode triggers ---
+    ptb_path = tmp_path / "not_a_dir"
+
+    # Run the function: forces sample_mode=True, sample_meta initially has no diagnostic_superclass
+    X, y, meta = load_ptbxl_sample(sample_dir=tmp_path, ptb_path=ptb_path)
+
+    # Assertions
+    assert isinstance(X, np.ndarray) and X.ndim == 3  # (N, 12, T)
+    assert isinstance(y, np.ndarray) and y.dtype == np.int64
+    # The key check: diagnostic_superclass column must have been added
+    assert "diagnostic_superclass" in meta.columns
+    assert len(meta) == len(X) == len(y)
+
+
 # ------------------------------------------------------------------------------
 # def load_ptbxl_full(data_dir, subsample_frac, sampling_rate=100):
 # ------------------------------------------------------------------------------
