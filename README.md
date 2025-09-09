@@ -1,5 +1,4 @@
- 
-# ECG Signal Classification with CNN (PTB-XL Dataset)
+# ECG-CNN (PyTorch) — PTB-XL ECG Classification
 
 [![CI](https://github.com/shaolinpat/ecg_cnn_pytorch/actions/workflows/ci.yml/badge.svg)](https://github.com/shaolinpat/ecg_cnn_pytorch/actions/workflows/ci.yml)
 [![Coverage (flag)](https://img.shields.io/codecov/c/github/shaolinpat/ecg_cnn_pytorch.svg?flag=flower_classifier&branch=main)](https://codecov.io/gh/shaolinpat/ecg_cnn_pytorch)  
@@ -7,100 +6,141 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/shaolinpat/ecg_cnn_pytorch/blob/main/ecg_cnn/train.py?force_reload=true)
 
+Reproducible, fully-tested deep learning pipeline for 12-lead ECG classification on **PTB-XL**.  
+Includes clean training/evaluation CLIs, YAML configs + grids, SHAP explainability, rich plots, and CSV summaries.
 
-This project implements a 1D Convolutional Neural Network (CNN) to classify ECG signals using the PTB-XL 12-lead ECG dataset. It was developed as a final project for an AI class and originally delivered as a `.py` script, now converted to Jupyter Notebook format.
-
----
-
-## Tools & Frameworks
-
-- Python 3.x
-- PyTorch
-- NumPy & Pandas
-- Matplotlib & TQDM
-- Stratified K-Fold cross-validation
-- Confusion matrix and classification report metrics
+> **For hiring managers:** This repo showcases production-grade ML engineering: modular PyTorch, deterministic pipelines, thorough tests, clear experiment tracking, and repeatable results—no hidden notebooks.
 
 ---
 
-## Model Summary
+## Highlights
 
-- A deep 1D CNN for classifying ECG beats into multiple rhythm categories
-- Two convolutional layers → pooling → dense → softmax
-- Optimized using `Adam` with categorical cross-entropy loss
-
----
-
-## Key Results
-
-- Model trained and validated using 5-fold stratified cross-validation
-- Performance metrics captured in `results_summary_pytorch.csv`
-- Confusion matrix and accuracy plotted and saved in `Outfiles_pytorch/`
+- **End-to-end**: data → training (single/k-fold) → evaluation → reports
+- **Modern PyTorch**: simple model registry, schedulers, clean Trainer
+- **Config-first**: YAML configs & grid expansion (`configs/`)
+- **Explainability**: SHAP channel-importance summaries
+- **Artifacts**: PR/ROC/confusion plots, per-fold reports, fold-level summary CSVs
+- **Tested**: extensive pytest suite (unit + behavioral), CI-friendly
+- **Fast demo**: ships with tiny sample ECGs to run immediately
 
 ---
 
-## Visualization Recommendations (To Add)
+## Repo Structure (trimmed)
+```
+ecg_cnn_pytorch/
+├── configs/        # Baseline & grid configs (YAML)
+├── data/
+│   ├── sample/     # Tiny CSV sample for quick runs
+│   └── ptbxl/      # (Optional) PTB-XL mirror
+├── demos/          # Streamlit demo
+├── ecg_cnn/        # Core package
+│   ├── config/     # Config loader
+│   ├── data/       # Dataset & utilities
+│   ├── models/     # Model registry & helpers
+│   ├── training/   # Trainer + CLI args + utils
+│   ├── utils/      # Plotting, validation, grid utils
+│   ├── evaluate.py # Evaluation CLI
+│   └── train.py    # Training CLI
+├── outputs/        # Default artifacts (ignored in git)
+├── tests/          # Pytest suite
+├── environment.yml # Conda env (recommended)
+└── README.md
+```
 
-- Sample waveforms for each class
-- Class distribution (before and after resampling, if used)
-- Confusion matrix plot
-- Training/validation loss curve
+Additional `outputs_*` folders contain precomputed artifacts to illustrate expected results.
 
 ---
 
-## Data Setup
+## Setup
 
-Before running the notebook or Streamlit app, fetch the datasets:
+### 1) Clone
 
 ```bash
-bash download_data.sh
+git clone https://github.com/<your-user>/ecg_cnn_pytorch.git
+cd ecg_cnn_pytorch
+```
+
+### 2) Environment (Conda recommended)
+
+```bash
+conda env create -f environment.yml
+conda activate ecg_cnn_env
+```
+
+*Pip fallback:*
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
 ---
 
-## How to Run
+## Quickstart (no downloads)
 
-1. Clone the repo
-2. Create environment:
+The repo includes a **tiny sample dataset** under `data/sample/` so you can exercise the full pipeline in seconds.
 
-   ```bash
-   conda create -n ecg_cnn python=3.11
-   conda activate ecg_cnn
-   pip install -r requirements.txt
-   ```
+```bash
+# Train a baseline on the sample data
+python -m ecg_cnn.train --config configs/baseline.yaml --sample-only
+```
+
+Artifacts land under `outputs/`:
+- `outputs/results/` — normalized config + run summaries
+- `outputs/models/` — `model_best_*_fold*.pth`
+- `outputs/history/` — `history_*_fold*.json`
+- `outputs/plots/` — accuracy/loss, ROC/PR, confusion matrices, SHAP
+- `outputs/reports/` — per-fold classification reports + aggregated fold summary
 
 ---
 
-## Quickstart Demo (time < 30 s)
+## Full PTB-XL (optional)
 
-Clone the repo and run on the bundled sample data:
+Download and stage PTB-XL via the helper script (PhysioNet account & license acceptance required).
 
 ```bash
-git clone git@github.com:yourusername/ecg_cnn.git
-cd ecg_cnn
-conda activate ecg_cnn           # or `pip install -r requirements.txt`
-python build_ptbxl_sample.py \
-  --n_records 100               # only first 100 records (if you need to regenerate)
-python train_ecg_cnn_ptbxl.py   # trains & evaluates on sample subset
+python scripts/fetch_ptbxl.py
+```
+
+Then train (omit `--sample-only`), optionally using a grid:
+
+```bash
+python -m ecg_cnn.train --config configs/grid.yaml
+# or a compact grid:
+python -m ecg_cnn.train --config configs/compact_grid.yaml
 ```
 
 ---
 
-## Full Dataset Reproduction (optional, ~3 GB, may take hours)
+## Evaluation CLI
 
-If you need the full 12-lead PTB-XL for deeper experiments:
+Evaluate and generate reports + plots:
 
 ```bash
-# 1) Install the downloader tools
-pip install wfdb awscli
+python -m ecg_cnn.evaluate --fold 1 --prefer latest
+```
 
-# 2) Fetch the full PTB-XL archive via S3 (resumable)
-python fetch_ptbxl.py   # pulls ~3 GB; time depends on your bandwidth
+Outputs appear in `outputs/plots/` and `outputs/reports/`.
 
-# 3) (Re)build the 100-record sample if you want to verify
-python build_ptbxl_sample.py --n_records 100
+---
 
-# 4) Train/evaluate on the full data directory
-python train_ecg_cnn_ptbxl.py \
-  --data-dir data/ptbxl/physionet.org/files/ptb-xl/1.0.3
-   ```
+## Tests
+
+Run the full test suite with coverage:
+
+```bash
+pytest -vv --maxfail=1 --disable-warnings --cov=ecg_cnn tests/
+```
+
+Generate a coverage report:
+
+```bash
+coverage html
+```
+
+
+---
+
+## License
+
+MIT License (see `LICENSE`).

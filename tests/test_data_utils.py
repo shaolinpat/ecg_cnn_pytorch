@@ -36,6 +36,7 @@ from ecg_cnn.data.data_utils import (
     load_ptbxl_full,
     raw_to_five_class,
     LABEL2IDX,
+    FIVE_SUPERCLASSES,
 )
 
 
@@ -471,6 +472,47 @@ def test_aggregate_diagnostic_restrict_false_unusual_code():
     assert result == ["ALIEN"]
 
 
+def test_aggregate_diagnostic_series_true_and_false_paths():
+    # Unique index -> .loc['SCP_A'] returns a Series
+    data = [
+        ("SCP_A", 1, FIVE_SUPERCLASSES[0]),  # diagnostic==1 -> TRUE branch
+        ("SCP_B", 0, FIVE_SUPERCLASSES[1]),  # diagnostic==0 -> FALSE branch
+    ]
+    df = pd.DataFrame(
+        data, columns=["code", "diagnostic", "diagnostic_class"]
+    ).set_index("code")
+
+    # TRUE branch: diagnostic==1
+    out_true = aggregate_diagnostic({"SCP_A": 1.0}, df, restrict=True)
+    assert out_true == [FIVE_SUPERCLASSES[0]]
+
+    # FALSE branch: diagnostic==0 -> ignored -> returns ["Unknown"]
+    out_false = aggregate_diagnostic({"SCP_B": 1.0}, df, restrict=True)
+    assert out_false == ["Unknown"]
+
+
+def test_aggregate_diagnostic_dataframe_from_duplicate_index_false_path_and_restrict_off():
+    # Duplicate index -> .loc['SCP_DUP'] returns a DataFrame (not a Series) -> FALSE branch
+    dup = [
+        ("SCP_DUP", 1, FIVE_SUPERCLASSES[2]),
+        ("SCP_DUP", 1, FIVE_SUPERCLASSES[3]),
+    ]
+    dup_df = pd.DataFrame(
+        dup, columns=["code", "diagnostic", "diagnostic_class"]
+    ).set_index("code")
+
+    out_dup = aggregate_diagnostic({"SCP_DUP": 1.0}, dup_df, restrict=True)
+    # Not a Series -> branch is false -> nothing appended -> ["Unknown"]
+    assert out_dup == ["Unknown"]
+
+    # Also verify restrict=False can include non-superclass labels
+    df2 = pd.DataFrame(
+        [("SCP_X", 1, "OTHER")], columns=["code", "diagnostic", "diagnostic_class"]
+    ).set_index("code")
+    out_all = aggregate_diagnostic({"SCP_X": 1.0}, df2, restrict=False)
+    assert out_all == ["OTHER"]
+
+
 # ------------------------------------------------------------------------------
 # def load_ptbxl_meta(ptb_path):
 # ------------------------------------------------------------------------------
@@ -716,7 +758,6 @@ def test_load_ptbxl_sample_sample_only_triggers_fallback(tmp_path):
 
 
 def test_load_ptbxl_sample_fallback_loader_reads_csvs(tmp_path):
-    # Force ptb_path to be missing → triggers lines 467–510
     sample_dir = tmp_path / "samples"
     sample_dir.mkdir()
     # Write two valid 12-lead CSVs
@@ -738,7 +779,6 @@ def test_load_ptbxl_sample_raises_if_ptb_path_invalid_and_not_sample_mode(tmp_pa
 
 
 def test_load_ptbxl_sample_load_ptbxl_sample_reads_with_wfdb(monkeypatch, tmp_path):
-    # Hit lines 576–580 by providing fake PTB path + wfdb.rdsamp
     sample_dir = tmp_path / "samples"
     sample_dir.mkdir()
     csv_path = sample_dir / "00001_lr_100hz.csv"
@@ -773,7 +813,7 @@ def test_load_ptbxl_sample_load_ptbxl_sample_reads_with_wfdb(monkeypatch, tmp_pa
 
 def test_load_ptbxl_sample_fallback_loader_hits_elif_and_else_branches(tmp_path):
     """
-    Covers 476–480:
+    Covers :
       - one file with shape (12, T) hits `elif arr.shape[0] == 12: pass`
       - one file with shape (7, 9) hits `else: continue` (skipped)
     """
@@ -797,7 +837,7 @@ def test_load_ptbxl_sample_fallback_loader_hits_elif_and_else_branches(tmp_path)
 
 def test_load_ptbxl_sample_fallback_loader_bad_stem_triggers_id_fallback(tmp_path):
     """
-    Covers 489–490: filename stem not int → except → ecg_id = i+1
+    Covers: filename stem not int → except → ecg_id = i+1
     """
     sample_dir = tmp_path / "samples"
     sample_dir.mkdir()
@@ -862,7 +902,7 @@ def test_load_ptbxl_sample_synth_meta_when_load_meta_fails_in_sample_mode(
 
 def test_load_ptbxl_sample_wfdb_path_is_used_in_non_sample_mode(monkeypatch, tmp_path):
     """
-    Covers 576–580: non-sample mode (no CSVs), valid ptb_path, use wfdb.rdsamp.
+    Covers: non-sample mode (no CSVs), valid ptb_path, use wfdb.rdsamp.
     """
     sample_dir = tmp_path / "samples"
     sample_dir.mkdir()  # empty => not sample mode
@@ -929,6 +969,71 @@ def test_load_ptbxl_sample_synthesize_meta_when_meta_load_fails_in_sample_mode(
     assert X.shape[1] == 12 and X.shape[0] == 1
     assert y.shape == (1,)
     assert "diagnostic_superclass" in meta.columns
+
+
+def test_load_ptbxl_sample_loader_rounds_out_all_five_classes(tmp_path):
+    """
+    When fewer than 5 labels are present, it round-robins missing class ids
+    into the first few samples so that all 5 classes (0..4) appear.
+    """
+    sample_dir: Path = tmp_path / "sample"
+    sample_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create 3 simple 12-lead CSVs (shape (T,12)) so not all 5 classes are present
+    # The loader will transpose if needed and fabricate labels in a 5-class cycle.
+    T = 20
+    leads = 12
+    for i in range(1, 4):  # only 3 CSVs -> <5 classes present initially
+        arr = np.arange(T * leads, dtype=float).reshape(T, leads)
+        np.savetxt(sample_dir / f"{i:05d}_toy.csv", arr, delimiter=",", fmt="%.1f")
+
+    # Force the 'ptb_path missing' branch to trigger sample-mode fallback:
+    missing_ptb = tmp_path / "ptb_root_does_not_exist"
+
+    X, y_int, meta = load_ptbxl_sample(
+        sample_dir=sample_dir,
+        ptb_path=missing_ptb,  # not a dir -> triggers the code block with branch 516
+        sample_only=True,
+    )
+
+    # Sanity: we loaded our 3 files
+    assert X.shape[0] == 3
+    assert len(y_int) == 3
+    assert len(meta) == 3
+
+    # After the round-robin step, labels remain in 0..4 and
+    # we should have as many distinct labels as samples (max diversity for N<5).
+    labels = set(y_int.tolist())
+    assert labels.issubset(set(range(5)))
+    assert len(labels) == len(y_int)  # e.g., for N=3 you’ll see 3 distinct labels
+
+
+def test_sample_loader_no_round_robin_when_all_five_classes_present(tmp_path):
+    """
+    With 5 CSVs, the fabricated labels cycle 0..4, so the round-robin block is
+    skipped.
+    """
+    sample_dir = tmp_path / "sample_all5"
+    sample_dir.mkdir(parents=True, exist_ok=True)
+
+    T, leads = 20, 12
+    # Create 5 CSVs -> label_cycle will yield 0,1,2,3,4 exactly once
+    for i in range(1, 6):
+        arr = np.arange(T * leads, dtype=float).reshape(T, leads)
+        np.savetxt(sample_dir / f"{i:05d}_toy.csv", arr, delimiter=",", fmt="%.1f")
+
+    missing_ptb = tmp_path / "ptb_root_does_not_exist"
+    X, y_int, meta = load_ptbxl_sample(
+        sample_dir=sample_dir,
+        ptb_path=missing_ptb,  # force sample-mode block
+        sample_only=True,
+    )
+
+    assert X.shape[0] == 5
+    assert len(y_int) == 5
+
+    # All five classes already present -> condition at 516 is FALSE -> no changes needed
+    assert set(y_int.tolist()) == set(range(5))
 
 
 # ------------------------------------------------------------------------------

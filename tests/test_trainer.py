@@ -1178,3 +1178,129 @@ def test_run_training_triggers_early_stopping_and_breaks(
     assert summary["fold"] is None
     assert summary["val_losses"] is None
     assert summary["val_accs"] is None
+
+
+def test_run_training_skips_val_block(monkeypatch, tmp_path, capsys):
+    """
+    Cover false branch by making the validation DataLoader None.
+    - Real DataLoader for train (type checks pass)
+    - 1 epoch so train_loss/acc exist
+    - 2 samples/class -> valid StratifiedKFold
+    - Class weights length == model num_classes
+    - Scheduler patched as a CLASS so isinstance(...) works
+    """
+
+    # Sandbox outputs
+    monkeypatch.setattr(trainer, "OUTPUT_DIR", tmp_path, raising=False)
+    monkeypatch.setattr(trainer, "HISTORY_DIR", tmp_path / "history", raising=False)
+    monkeypatch.setattr(trainer, "ARTIFACTS_DIR", tmp_path / "artifacts", raising=False)
+    monkeypatch.setattr(trainer, "MODELS_DIR", tmp_path / "models", raising=False)
+    monkeypatch.setattr(trainer, "RESULTS_DIR", tmp_path / "results", raising=False)
+
+    # Tiny, valid sample dataset: 2 samples per class (5 classes -> 10 rows)
+    FIVE = getattr(trainer, "FIVE_SUPERCLASSES", ["C0", "C1", "C2", "C3", "C4"])
+
+    def _fake_sample(sample_dir=None, ptb_path=None):
+        n_classes = len(FIVE)  # 5
+        reps = 2  # two per class
+        N = n_classes * reps  # 10
+        X = np.zeros((N, 1, 8), dtype=np.float32)
+        y = [cls for cls in FIVE for _ in range(reps)]
+        meta = pd.DataFrame({"id": list(range(N))})
+        return X, y, meta
+
+    monkeypatch.setattr(trainer, "load_ptbxl_sample", _fake_sample, raising=True)
+
+    # Force CPU
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False, raising=True)
+
+    # Class weights must match model output size (len(FIVE)=5)
+    monkeypatch.setattr(
+        training_utils,
+        "compute_class_weights",
+        lambda y, n: torch.ones(len(FIVE)),
+        raising=True,
+    )
+
+    # Minimal real model so backward() is valid and fast
+    class _MiniNet(torch.nn.Module):
+        def __init__(self, num_classes):
+            super().__init__()
+            self.fc = torch.nn.Linear(8, num_classes)  # flatten 1*8 -> logits
+
+        def forward(self, x):
+            x = x.view(x.size(0), -1)
+            return self.fc(x)
+
+    # Make model_utils.<ModelName>() return _MiniNet
+    def _make_model(num_classes):
+        return _MiniNet(num_classes)
+
+    monkeypatch.setattr(
+        trainer,
+        "model_utils",
+        types.SimpleNamespace(ECGConvNet=_make_model),
+        raising=False,
+    )
+
+    # Patch LR scheduler with a CLASS (so isinstance(..., ReduceLROnPlateau) works)
+    class _DummyReduce:
+        def __init__(self, *a, **k):
+            pass
+
+        def step(self, *a, **k):
+            pass
+
+    monkeypatch.setattr(
+        torch.optim.lr_scheduler, "ReduceLROnPlateau", _DummyReduce, raising=True
+    )
+
+    # DataLoader wrapper: 1st call -> real DataLoader; 2nd call (val) -> None
+    _dl_calls = {"n": 0}
+
+    def _DL_wrapper(*a, **k):
+        _dl_calls["n"] += 1
+        if _dl_calls["n"] == 1:
+            ds = a[0]
+            return DataLoader(
+                ds,
+                batch_size=k.get("batch_size", 2),
+                shuffle=k.get("shuffle", False),
+                pin_memory=k.get("pin_memory", False),
+            )
+        return None
+
+    monkeypatch.setattr(trainer, "DataLoader", _DL_wrapper, raising=True)
+
+    # Real TrainConfig; n_folds>=2 since we pass fold_idx; 1 epoch to define train_*.
+    cfg = TrainConfig(
+        model="ECGConvNet",
+        lr=1e-3,
+        batch_size=2,
+        weight_decay=0.0,
+        n_epochs=1,
+        save_best=False,
+        sample_only=True,  # uses _fake_sample
+        subsample_frac=0.0,
+        sampling_rate=100,
+        data_dir=None,
+        sample_dir=None,
+        verbose=False,
+        n_folds=2,  # required with fold_idx
+        plots_enable_ovr=False,
+        plots_ovr_classes=[],
+    ).finalize()
+
+    # Run: fold path; val loader is None -> skip CSV section (551–586)
+    summary = run_training(cfg, fold_idx=0, tag="t")
+
+    out = capsys.readouterr().out
+    assert "Saved training history to:" in out
+    assert "Saved classification report to:" not in out  # false branch covered
+
+    # Footer: val_* chosen as None; train_* exist (floats)
+    assert summary["fold"] == 1
+    assert summary["val_accs"] is None
+    assert summary["val_losses"] is None
+    assert isinstance(summary["train_losses"], float)
+    assert isinstance(summary["train_accs"], float)

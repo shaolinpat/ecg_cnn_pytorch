@@ -12,4 +12,8 @@ source =
 
 [report]
 show_missing = True
-skip_covered = True
+skip_covered = False
+
+omit =
+    ecg_cnn/utils/find_labels.py
+ 

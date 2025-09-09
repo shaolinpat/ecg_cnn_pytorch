@@ -1714,21 +1714,6 @@ def evaluate_and_plot(
     report_dir.mkdir(parents=True, exist_ok=True)
     plot_dir.mkdir(parents=True, exist_ok=True)
 
-    # print(
-    #     f"\n=== Final Evaluation (Model={model}, LR={lr}, BS={bs}, Fold={fold}, Epochs={epoch}) ==="
-    # )
-
-    # print("Classification Report:")
-    # print(
-    #     classification_report(
-    #         y_true,
-    #         y_pred,
-    #         labels=list(range(len(class_names))),
-    #         target_names=class_names,
-    #         zero_division=0,
-    #     )
-    # )
-
     # --- Save classification report and heatmap ---
     save_classification_report(
         y_true=y_true,
@@ -2515,7 +2500,7 @@ def save_classification_report_csv(
 
     out_folder.mkdir(parents=True, exist_ok=True)
 
-    cr_dict = classification_report(y_true, y_pred, output_dict=True)
+    cr_dict = classification_report(y_true, y_pred, output_dict=True, zero_division=0)
     labels = ["CD", "HYP", "MI", "NORM", "STTC"]
     header = ["label", "precision", "recall", "f1-score", "support"]
     out_path = out_folder / f"classification_report_{tag}_fold{fold_id}.csv"

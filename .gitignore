@@ -35,3 +35,7 @@ outputs/
 data/larger_sample/
 data/ptbxl/
 
+# Coverage stuff
+.coverage
+.coverage.*
+htmlcov/

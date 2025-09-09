@@ -305,11 +305,12 @@ def test_train_entrypoint_calls_main(monkeypatch, tmp_path, patch_paths):
     # Patch the source module that train.py imports from
     monkeypatch.setattr("ecg_cnn.paths.RESULTS_DIR", results_dir, raising=False)
 
-    # ------------------------------------------------------------------
-    # Sandbox: redirect all paths into tmp_path so no writes escape to real outputs/
-    # ALSO: install a fully-populated ecg_cnn.paths module (with DEFAULT_TRAINING_CONFIG)
-    # to avoid leaking a prior stub from sys.modules.
-    # ------------------------------------------------------------------
+    # --------------------------------------------------------------------------
+    # Sandbox: redirect all paths into tmp_path so no writes escape to real
+    # outputs/
+    # ALSO: install a fully-populated ecg_cnn.paths module (with
+    # DEFAULT_TRAINING_CONFIG) to avoid leaking a prior stub from sys.modules.
+    # --------------------------------------------------------------------------
     base = tmp_path
     sand = {
         # results go to the fixture's results_dir so your asserts line up
@@ -357,7 +358,6 @@ def test_train_entrypoint_calls_main(monkeypatch, tmp_path, patch_paths):
     monkeypatch.setattr(
         "ecg_cnn.training.trainer._write_history", lambda *a, **k: None, raising=False
     )
-    # ------------------------------------------------------------------
 
     # Prevent argparse from seeing pytest args + stub parse_training_args/overrides
     monkeypatch.setattr("sys.argv", ["python"], raising=False)  # neutral argv
@@ -425,7 +425,6 @@ def test_train_entrypoint_calls_main(monkeypatch, tmp_path, patch_paths):
             )
         )
         config_path.write_text("model: {}\n".format(config.model))
-        # --------------------------------------------------------
 
         return {
             "loss": 0.5,
@@ -575,6 +574,47 @@ def test_main_best_by_accuracy_branch_none(tmp_path, monkeypatch, capsys):
     assert "Best model by loss: /tmp/x.pt (epoch 3)" in out
     assert "Best-by-loss summary:" in out
     assert "Best model by accuracy: <none> (no accuracy recorded)" in out
+
+
+def test_main_skips_best_block_when_grid_is_empty(monkeypatch, capsys):
+    """
+    Strategy:
+      - Pretend a config file was provided.
+      - Force is_grid_config(...) -> True and expand_grid(...) -> [].
+      - With an empty raw grid, param_grid becomes [] and the loop never runs.
+      - all_summaries remains empty, so the 'if all_summaries:' block is skipped.
+    """
+
+    # Minimal args stub: pretend user passed a config path; keep quiet output
+    class NS:
+        config = "dummy.yaml"
+        verbose = False
+
+    monkeypatch.setattr(train, "parse_training_args", lambda: NS())
+
+    # Baseline loader returns a lightweight object; it won't be used because grid is empty,
+    # but returning something harmless keeps earlier steps robust.
+    class DummyCfg:
+        verbose = False
+        n_folds = None
+
+    monkeypatch.setattr(train, "load_training_config", lambda _p: DummyCfg())
+
+    # YAML read returns a dict (contents irrelevant for this test)
+    monkeypatch.setattr(train, "load_yaml_as_dict", lambda _p: {})
+
+    # Force grid branch, but with zero expansions -> empty param_grid
+    monkeypatch.setattr(train, "is_grid_config", lambda _d: True)
+    monkeypatch.setattr(train, "expand_grid", lambda _d: [])
+
+    # Run main; loop should be skipped; only elapsed time printed
+    train.main()
+
+    out = capsys.readouterr().out
+    assert "Elapsed time:" in out
+    assert "Starting training run" not in out
+    assert "Saved best selections" not in out
+    assert "Saved summary to:" not in out
 
 
 # ------------------------------------------------------------------------------

@@ -8,7 +8,6 @@ No environment variables, no custom pytest markers.
 """
 
 import numpy as np
-import pytest
 
 from ecg_cnn.data.data_utils import load_ptbxl_full, load_ptbxl_sample
 from ecg_cnn.paths import PTBXL_DATA_DIR, PROJECT_ROOT
@@ -45,20 +44,12 @@ def test_loaders_integration_smoke():
     assert np.isfinite(Xf).all()
     assert all(isinstance(lbl, str) for lbl in yf)
 
-    print("=== Full loader (1% subsample) ===")
-    print("X.shape:", Xf.shape)
-    print("Raw unique labels:", sorted(set(yf)))
-
     keep_f = np.array([lbl != "Unknown" for lbl in yf], dtype=bool)
     Xf2 = Xf[keep_f]
     yf2 = [lbl for i, lbl in enumerate(yf) if keep_f[i]]
     meta_f2 = meta_f.loc[keep_f].reset_index(drop=True)
 
     assert len(Xf2) == len(yf2) == len(meta_f2)
-    print("After dropping 'Unknown':")
-    print("  X.shape:", Xf2.shape)
-    print("  Remaining classes:", sorted(set(yf2)))
-    print()
 
     # 2) Sample loader on the 100-record subset
     Xs, ys, meta_s = load_ptbxl_sample(sample_dir=SAMPLE_DIR, ptb_path=PTBXL_DATA_DIR)
@@ -70,16 +61,9 @@ def test_loaders_integration_smoke():
     assert np.isfinite(Xs).all()
     assert all(isinstance(lbl, str) for lbl in ys)
 
-    print("=== Sample loader (100 records) ===")
-    print("X.shape:", Xs.shape)
-    print("Raw unique labels:", sorted(set(ys)))
-
     keep_s = np.array([lbl != "Unknown" for lbl in ys], dtype=bool)
     Xs2 = Xs[keep_s]
     ys2 = [lbl for i, lbl in enumerate(ys) if keep_s[i]]
     meta_s2 = meta_s.loc[keep_s].reset_index(drop=True)
 
     assert len(Xs2) == len(ys2) == len(meta_s2)
-    print("After dropping 'Unknown':")
-    print("  X.shape:", Xs2.shape)
-    print("  Remaining classes:", sorted(set(ys2)))

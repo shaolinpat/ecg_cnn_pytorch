@@ -14,6 +14,7 @@ Goals
     5) Verify load_yaml_as_dict handles valid, invalid, and missing files.
 """
 
+import os
 import pytest
 import tempfile
 import yaml
@@ -27,6 +28,7 @@ from ecg_cnn.config.config_loader import (
     TrainConfig,
 )
 
+
 # ------------------------------------------------------------------------------
 # Local helpers
 # ------------------------------------------------------------------------------
@@ -38,6 +40,29 @@ def make_temp_yaml(data: dict) -> Path:
     yaml.safe_dump(data, tmp, sort_keys=True)
     tmp.close()
     return Path(tmp.name)
+
+
+def base_cfg(**overrides):
+    # minimal valid config with required fields
+    defaults = dict(
+        model="ECGResNet",
+        lr=1e-3,
+        batch_size=8,
+        weight_decay=0.0,
+        n_epochs=1,
+        save_best=True,  # will override per-test
+        sample_only=False,  # will override per-test
+        subsample_frac=1.0,
+        sampling_rate=100,
+        data_dir=None,  # will override per-test
+        sample_dir=None,  # will override per-test
+        verbose=True,  # will override per-test
+        n_folds=1,
+        plots_enable_ovr=False,
+        plots_ovr_classes=[],
+    )
+    defaults.update(overrides)
+    return TrainConfig(**defaults)
 
 
 # ==============================================================================
@@ -68,6 +93,40 @@ def test_finalize_normalizes_flags_and_paths():
     assert cfg.n_folds == 1
     assert isinstance(cfg.data_dir, Path)
     assert isinstance(cfg.sample_dir, Path)
+
+
+def test_finalize_sets_boolean_defaults_when_none():
+    cfg = base_cfg(save_best=None, sample_only=None, verbose=None)
+    out = cfg.finalize()
+    assert out.save_best is False
+    assert out.sample_only is False
+    assert out.verbose is False
+
+
+def test_finalize_keeps_boolean_values_when_not_none():
+    cfg = base_cfg(save_best=True, sample_only=False, verbose=True)
+    out = cfg.finalize()
+    assert out.save_best is True
+    assert out.sample_only is False
+    assert out.verbose is True
+
+
+def test_finalize_normalizes_str_paths_to_Path():
+    cfg = base_cfg(data_dir="data/ptbxl", sample_dir="data/sample")
+    out = cfg.finalize()
+    assert isinstance(out.data_dir, Path)
+    assert isinstance(out.sample_dir, Path)
+    assert str(out.data_dir).endswith(os.path.join("data", "ptbxl"))
+    assert str(out.sample_dir).endswith(os.path.join("data", "sample"))
+
+
+def test_finalize_leaves_path_and_none_alone():
+    dd = Path("already/path")
+    sd = None
+    cfg = base_cfg(data_dir=dd, sample_dir=sd)
+    out = cfg.finalize()
+    assert out.data_dir is dd  # unchanged Path instance
+    assert out.sample_dir is None  # stays None
 
 
 # ==============================================================================

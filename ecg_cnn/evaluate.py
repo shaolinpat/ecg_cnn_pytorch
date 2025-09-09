@@ -964,7 +964,7 @@ def main(
     fold_id = None
     if isinstance(best_fold, int) and best_fold > 0:
         fold_id = best_fold
-    elif isinstance(best_model_path, Path):
+    else:
         m = re.search(r"fold(\d+)", best_model_path.name)
         if m:
             fold_id = int(m.group(1))

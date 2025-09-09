@@ -30,8 +30,9 @@ Notes
 
 from __future__ import annotations
 
+import csv
 import io
-
+import json
 import numpy as np
 import pandas as pd
 import pytest
@@ -41,6 +42,7 @@ import torch
 from contextlib import redirect_stdout
 from pathlib import Path
 from sklearn.metrics import brier_score_loss
+from types import SimpleNamespace
 
 from ecg_cnn.utils.plot_utils import (
     _build_plot_title,
@@ -68,13 +70,13 @@ from ecg_cnn.utils.plot_utils import (
 )
 
 # ------------------------------------------------------------------------------
-# Globals
+# globals
 # ------------------------------------------------------------------------------
 
 shap = pytest.importorskip("shap", reason="SHAP not installed")
 
 # ------------------------------------------------------------------------------
-# helper methods
+# helpers
 # ------------------------------------------------------------------------------
 
 
@@ -180,6 +182,65 @@ def test_format_hparams_float_trimming_various_values():
     )
     assert "lr000123" in fname
     assert "wd01" in fname
+
+
+def test_format_hparams_includes_model_token():
+    """
+    True branch: non-empty model is included in the filename.
+    """
+    out = format_hparams(
+        model="ECGConvNet",
+        lr=0.001,
+        bs=64,
+        wd=0.0,
+        prefix="final",
+        fname_metric="loss",
+        fold=3,
+        epoch=12,
+    )
+    parts = out.split("_")
+    assert parts[0] == "final"
+    assert parts[1] == "loss"
+    assert "ECGConvNet" in parts  # model token present
+    assert any(p.startswith("lr") for p in parts)
+    assert any(p.startswith("bs") for p in parts)
+    assert any(p.startswith("wd") for p in parts)
+    assert "fold3" in parts
+    assert "epoch12" in parts
+
+
+def test_format_hparams_skips_model_when_empty(monkeypatch):
+    """
+    False branch: empty model string should be skipped.
+    Bypass validation so model="" is allowed.
+    """
+    # Disable validation inside format_hparams without importing the module
+    monkeypatch.setitem(
+        format_hparams.__globals__, "validate_hparams_formatting", lambda **kwargs: None
+    )
+
+    out = format_hparams(
+        model="",  # empty -> should NOT add a blank token
+        lr=0.001,
+        bs=64,
+        wd=0.0,
+        prefix="best",
+        fname_metric="accuracy",
+        fold=None,
+        epoch=None,
+    )
+    parts = out.split("_")
+    assert parts[0] == "best"
+    assert parts[1] == "accuracy"
+    # No empty tokens or phantom slot for model
+    assert "" not in parts
+    # Usual tokens still present
+    assert any(p.startswith("lr") for p in parts)
+    assert any(p.startswith("bs") for p in parts)
+    assert any(p.startswith("wd") for p in parts)
+    # Fold/epoch were None, so absent
+    assert all(not p.startswith("fold") for p in parts)
+    assert all(not p.startswith("epoch") for p in parts)
 
 
 # ------------------------------------------------------------------------------
@@ -3222,6 +3283,180 @@ def test_shap_compute_values_deep_fails_non_tf_raises_runtime(monkeypatch):
     assert "SHAP DeepExplainer failed:" in str(ei.value)
 
 
+def test_shap_invalid_logits_shape_raises_and_restores_mode(monkeypatch):
+    # model forward returns invalid shape -> triggers
+    class M(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.p = torch.nn.Parameter(torch.tensor(0.0))
+
+        def forward(self, x):
+            return torch.zeros((1, 1, 8))  # invalid (3D)
+
+    m = M().train()
+    X = np.zeros((2, 1, 8), dtype=np.float32)
+    bg = np.zeros((1, 1, 8), dtype=np.float32)
+    with pytest.raises(ValueError):
+        shap_compute_values(m, X, bg)
+    assert m.training is True  # training mode restored on error
+
+
+def test_shap_compute_values_tf_fallback_then_fail_raises_runtimeerror(monkeypatch):
+    # DeepExplainer raises TF import error -> GradientExplainer also fails
+    class M(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.p = torch.nn.Parameter(torch.tensor(0.0))
+
+        def forward(self, x):
+            return torch.zeros((1, 5))
+
+    m = M()
+    X = np.zeros((2, 1, 8), dtype=np.float32)
+    bg = np.zeros((1, 1, 8), dtype=np.float32)
+
+    def _deep(*a, **k):
+        raise Exception("No module named 'tensorflow'")
+
+    def _grad(*a, **k):
+        raise Exception("gradient explainer boom")
+
+    monkeypatch.setattr(shap, "DeepExplainer", _deep, raising=True)
+    monkeypatch.setattr(shap, "GradientExplainer", _grad, raising=True)
+
+    with pytest.raises(RuntimeError):
+        shap_compute_values(m, X, bg)
+
+
+def test_shap_compute_values_deep_fail_non_tf_raises_runtimeerror(monkeypatch):
+    # DeepExplainer raises non-TF error
+    class M(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.p = torch.nn.Parameter(torch.tensor(0.0))
+
+        def forward(self, x):
+            return torch.zeros((1, 3))
+
+    m = M()
+    X = np.zeros((2, 1, 8), dtype=np.float32)
+    bg = np.zeros((1, 1, 8), dtype=np.float32)
+
+    def _deep(*a, **k):
+        raise Exception("some other backend error")
+
+    monkeypatch.setattr(shap, "DeepExplainer", _deep, raising=True)
+
+    with pytest.raises(RuntimeError):
+        shap_compute_values(m, X, bg)
+
+
+def test_shap_compute_values_invalid_logits_shape_restores_mode_false_branch():
+    class M(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.p = torch.nn.Parameter(torch.tensor(0.0))
+
+        def forward(self, x):
+            return torch.zeros((1, 1, 8))  # invalid (3D)
+
+    m = M().eval()
+    X = np.zeros((2, 1, 8), dtype=np.float32)
+    bg = np.zeros((1, 1, 8), dtype=np.float32)
+
+    with pytest.raises(ValueError):
+        shap_compute_values(m, X, bg)
+    assert m.training is False
+
+
+@pytest.mark.parametrize(
+    "deep_err, expect_tf_fallback",
+    [
+        ("No module named 'tensorflow'", True),
+        ("some other backend error", False),
+    ],
+)
+def test_shapc_compute_values_deep_fails(monkeypatch, deep_err, expect_tf_fallback):
+    class M(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.p = torch.nn.Parameter(torch.tensor(0.0))
+
+        def forward(self, x):
+            return torch.zeros((1, 3))  # valid logits
+
+    m = M()
+    X = np.zeros((2, 1, 8), dtype=np.float32)
+    bg = np.zeros((1, 1, 8), dtype=np.float32)
+
+    class _Deep:
+        def __init__(self, *a, **k):
+            raise Exception(deep_err)
+
+    if expect_tf_fallback:
+
+        class _Grad:
+            def __init__(self, *a, **k):
+                raise Exception("gradient fail")
+
+        shap_ns = SimpleNamespace(DeepExplainer=_Deep, GradientExplainer=_Grad)
+    else:
+        shap_ns = SimpleNamespace(DeepExplainer=_Deep)
+
+    monkeypatch.setitem(shap_compute_values.__globals__, "shap", shap_ns)
+
+    with pytest.raises(RuntimeError):
+        shap_compute_values(m, X, bg)
+
+
+@pytest.mark.parametrize(
+    "deep_err, patch_grad",
+    [
+        (
+            "No module named 'tensorflow'",
+            True,
+        ),  # false branch of model_was_training
+        (
+            "some other backend error",
+            False,
+        ),  # false branch of model_was_training
+    ],
+)
+def test_shap_compute_values_deep_fail_false_branch(monkeypatch, deep_err, patch_grad):
+    class M(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.p = torch.nn.Parameter(torch.tensor(0.0))
+
+        def forward(self, x):
+            return torch.zeros((1, 3))
+
+    m = M().eval()  # <<< must be eval() to skip the restore call
+
+    X = np.zeros((2, 1, 8), dtype=np.float32)
+    bg = np.zeros((1, 1, 8), dtype=np.float32)
+
+    class _Deep:
+        def __init__(self, *a, **k):
+            raise Exception(deep_err)
+
+    if patch_grad:
+
+        class _Grad:
+            def __init__(self, *a, **k):
+                raise Exception("grad fail")
+
+        shap_ns = SimpleNamespace(DeepExplainer=_Deep, GradientExplainer=_Grad)
+    else:
+        shap_ns = SimpleNamespace(DeepExplainer=_Deep)
+
+    monkeypatch.setitem(shap_compute_values.__globals__, "shap", shap_ns)
+
+    with pytest.raises(RuntimeError):
+        shap_compute_values(m, X, bg)
+    assert m.training is False
+
+
 # ------------------------------------------------------------------------------
 # save_classification_report_csv()
 # ------------------------------------------------------------------------------
@@ -3602,3 +3837,59 @@ def test_save_fold_summary_csv_skips_too_short_rows_then_reads_macro(tmp_path):
     content = out_csv.read_text().splitlines()
     row1 = next(r for r in content if r.startswith("1,"))
     assert row1.split(",")[4] == "0.42"  # ensured the short row was skipped
+
+
+def test_save_fold_summary_csv_no_f1_column_skips_macro(tmp_path):
+    # hits: header too short -> f1_i stays None -> loop continues with no macro_f1
+    tag = "t2"
+    reports = tmp_path / "outputs" / "reports"
+    artifacts = tmp_path / "outputs" / "artifacts"
+    history = tmp_path / "outputs" / "history"
+    artifacts.mkdir(parents=True, exist_ok=True)
+    history.mkdir(parents=True, exist_ok=True)
+    reports.mkdir(parents=True, exist_ok=True)
+
+    # Two folds
+    (history / f"history_{tag}_fold1.json").write_text(
+        json.dumps({"val_acc": [0.5], "val_loss": [0.4], "best_epoch": 0})
+    )
+    (history / f"history_{tag}_fold2.json").write_text(
+        json.dumps({"val_acc": [0.55], "val_loss": [0.45], "best_epoch": 0})
+    )
+
+    # Fold 1 CSV with header <4 cols -> f1_i remains None; no macro_f1 parsed
+    with (artifacts / f"classification_report_{tag}_fold1.csv").open(
+        "w", newline=""
+    ) as fh:
+        w = csv.writer(fh)
+        w.writerow(["a", "b"])  # too short
+        w.writerow(["macro avg", "x"])
+
+    out = save_fold_summary_csv(reports, tag)
+    assert out is not None and out.exists()
+    txt = out.read_text()
+    # file is written; macro_f1 column exists but may be empty for the affected fold
+    assert "mean_val_acc" in txt and "mean_val_loss" in txt
+
+
+def test_save_fold_summary_csv_rows_csv_empty(tmp_path):
+    tag = "t"
+    reports = tmp_path / "outputs" / "reports"
+    artifacts = tmp_path / "outputs" / "artifacts"
+    history = tmp_path / "outputs" / "history"
+    artifacts.mkdir(parents=True, exist_ok=True)
+    history.mkdir(parents=True, exist_ok=True)
+    reports.mkdir(parents=True, exist_ok=True)
+
+    (history / f"history_{tag}_fold1.json").write_text(
+        json.dumps({"val_acc": [0.7], "val_loss": [0.5], "best_epoch": 0})
+    )
+    (history / f"history_{tag}_fold2.json").write_text(
+        json.dumps({"val_acc": [0.6], "val_loss": [0.6], "best_epoch": 0})
+    )
+
+    # Empty file => rows_csv == [] => hits skip inner parsing
+    (artifacts / f"classification_report_{tag}_fold1.csv").write_text("")
+
+    out = save_fold_summary_csv(reports, tag)
+    assert out is not None and out.exists()
