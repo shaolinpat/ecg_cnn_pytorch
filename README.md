@@ -56,7 +56,7 @@ Additional `outputs_*` folders contain precomputed artifacts to illustrate expec
 ### 1) Clone
 
 ```bash
-git clone https://github.com/<your-user>/ecg_cnn_pytorch.git
+git clone https://github.com/shaolinpat/ecg_cnn_pytorch.git
 cd ecg_cnn_pytorch
 ```
 
