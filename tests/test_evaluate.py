@@ -1258,7 +1258,7 @@ def test_main_cli_path_calls_parse_evaluate_args(monkeypatch, tmp_path):
             enable_ovr=None,
             ovr_classes=None,
             fold=1,
-            prefer="auto",
+            prefer="latest",  # force deterministic tag-based path
             shap_profile="off",
             shap_n=None,
             shap_bg=None,
@@ -1274,6 +1274,8 @@ def test_main_cli_path_calls_parse_evaluate_args(monkeypatch, tmp_path):
     evaluate.OUTPUT_DIR = tmp_path
     evaluate.REPORTS_DIR = tmp_path / "reports"
     evaluate.REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    evaluate.RESULTS_DIR = tmp_path  # sandbox results lookup
+    evaluate.MODELS_DIR = tmp_path  # sandbox model paths
     evaluate.tag = "t"
     evaluate.best_fold = 1
     evaluate.best_epoch = 1
@@ -1296,16 +1298,7 @@ def test_main_cli_path_calls_parse_evaluate_args(monkeypatch, tmp_path):
         raising=False,
     )
 
-    monkeypatch.setattr(
-        evaluate,
-        "MODEL_CLASSES",
-        {
-            "ECGResNet": lambda num_classes, **kw: _TinyLogitModel(
-                num_classes, input_channels=12
-            )
-        },
-        raising=False,
-    )
+    # Create a mock model file we will "load"
     (tmp_path / "mock.pt").write_bytes(b"")
 
     # Return a minimal state_dict that matches the _Tiny model’s Linear layer
@@ -1347,11 +1340,145 @@ def test_main_cli_path_calls_parse_evaluate_args(monkeypatch, tmp_path):
         raising=False,
     )
 
+    # Register tiny stub models in the actual registry used at runtime
+    monkeypatch.setitem(
+        models.MODEL_CLASSES,
+        "ECGConvNet",
+        lambda num_classes, **kw: _TinyLogitModel(num_classes, input_channels=12),
+    )
+    monkeypatch.setitem(
+        models.MODEL_CLASSES,
+        "ECGResNet",
+        lambda num_classes, **kw: _TinyLogitModel(num_classes, input_channels=12),
+    )
+    print("ids:", id(models.MODEL_CLASSES), id(evaluate.MODEL_CLASSES))
+
     # Execute with no parsed_args and no overrides, which must hit parse_evaluate_args()
     evaluate.main(parsed_args=None, shap_profile=None)
 
     # Assert the CLI parse path was taken
     assert called["count"] == 1
+
+
+# def test_main_cli_path_calls_parse_evaluate_args(monkeypatch, tmp_path):
+#     """
+#     Covers: evaluate.main normal CLI path.
+#     Asserts parse_evaluate_args() IS called when parsed_args is None and no overrides are given.
+#     """
+#     # Flag to verify parse_evaluate_args was invoked
+#     called = {"count": 0}
+
+#     def _fake_parse():
+#         called["count"] += 1
+#         return SimpleNamespace(
+#             enable_ovr=None,
+#             ovr_classes=None,
+#             fold=1,
+#             prefer="auto",
+#             shap_profile="off",
+#             shap_n=None,
+#             shap_bg=None,
+#             shap_stride=None,
+#             data_dir=None,
+#             sample_dir=None,
+#         )
+
+#     monkeypatch.setattr(evaluate, "parse_evaluate_args", _fake_parse, raising=False)
+
+#     # Minimal runtime context and stubs to short-circuit heavy work
+#     evaluate.device = torch.device("cpu")
+#     evaluate.OUTPUT_DIR = tmp_path
+#     evaluate.REPORTS_DIR = tmp_path / "reports"
+#     evaluate.REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+#     evaluate.tag = "t"
+#     evaluate.best_fold = 1
+#     evaluate.best_epoch = 1
+
+#     monkeypatch.setattr(
+#         evaluate, "evaluate_and_plot", lambda *a, **k: None, raising=False
+#     )
+#     monkeypatch.setattr(
+#         evaluate, "_load_history", lambda *a, **k: ([], [], [], []), raising=False
+#     )
+
+#     monkeypatch.setattr(
+#         evaluate,
+#         "load_ptbxl_full",
+#         lambda **kw: (
+#             torch.ones((4, 12, 10)).numpy(),
+#             ["NORM", "NORM", "NORM", "NORM"],
+#             pd.DataFrame({"id": [0, 1, 2, 3]}),
+#         ),
+#         raising=False,
+#     )
+
+#     monkeypatch.setattr(
+#         evaluate,
+#         "MODEL_CLASSES",
+#         {
+#             "ECGResNet": lambda num_classes, **kw: _TinyLogitModel(
+#                 num_classes, input_channels=12
+#             )
+#         },
+#         raising=False,
+#     )
+#     (tmp_path / "mock.pt").write_bytes(b"")
+
+#     # Return a minimal state_dict that matches the _Tiny model’s Linear layer
+#     monkeypatch.setattr("torch.load", lambda *a, **k: {}, raising=False)
+
+#     monkeypatch.setattr(
+#         evaluate, "_latest_config_path", lambda: tmp_path / "config.yaml", raising=False
+#     )
+#     monkeypatch.setattr(
+#         evaluate,
+#         "_load_config_and_extras",
+#         lambda path, fold_override: (
+#             SimpleNamespace(
+#                 model="ECGResNet",
+#                 batch_size=2,
+#                 subsample_frac=1.0,
+#                 sampling_rate=100,
+#                 lr=0.001,
+#                 weight_decay=0.0,
+#                 data_dir=None,
+#                 sample_dir=None,
+#             ),
+#             {"tag": "t", "fold": 1},
+#         ),
+#         raising=False,
+#     )
+#     monkeypatch.setattr(
+#         evaluate,
+#         "_read_summary",
+#         lambda tag: [
+#             {"model_path": str(tmp_path / "mock.pt"), "best_epoch": 1, "fold": 1}
+#         ],
+#         raising=False,
+#     )
+#     monkeypatch.setattr(
+#         evaluate,
+#         "_select_best_entry",
+#         lambda summaries, fold_override=None: summaries[0],
+#         raising=False,
+#     )
+
+#     monkeypatch.setitem(
+#         models.MODEL_CLASSES,
+#         "ECGConvNet",
+#         lambda num_classes, **kw: _TinyLogitModel(num_classes, input_channels=12),
+#     )
+#     monkeypatch.setitem(
+#         models.MODEL_CLASSES,
+#         "ECGResNet",
+#         lambda num_classes, **kw: _TinyLogitModel(num_classes, input_channels=12),
+#     )
+
+#     # Execute with no parsed_args and no overrides, which must hit parse_evaluate_args()
+#     evaluate.main(parsed_args=None, shap_profile=None)
+
+#     # Assert the CLI parse path was taken
+#     assert called["count"] == 1
 
 
 def test_cli_entrypoint_covers_main(monkeypatch, tmp_path):

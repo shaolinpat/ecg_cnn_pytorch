@@ -32,7 +32,8 @@ sample_dir: null     # Optional override for sample data location
 # Control Plotting in evaluate.py
 # ------------------------------------------------------------------------------
 plots_enable_ovr: false
-plots_ovr_classes: []
+plots_ovr_classes: ["__placeholder__"] # replace with any combination from 
+                                       # data/data_utils/FIVE_SUPERCLASSES
 
 # ------------------------------------------------------------------------------
 # Housekeeping

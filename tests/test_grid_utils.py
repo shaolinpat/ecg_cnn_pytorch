@@ -116,3 +116,21 @@ def test_expand_grid_preserves_non_grid_keys():
     out = list(expand_grid(config))
     for d in out:
         assert d["batch_size"] == 64 and d["epochs"] == 5
+
+
+def test_expand_grid_treats_scalar_list_key_atomically():
+    cfg = {
+        "lr": 0.001,
+        "plots_ovr_classes": [
+            "MI",
+            "CD",
+        ],  # key is in SCALAR_LIST_KEYS; simple list (not list-of-lists)
+    }
+    runs = list(expand_grid(cfg))
+    assert len(runs) == 1
+    out = runs[0]
+    # Must remain a list, not expanded element-by-element
+    assert out["plots_ovr_classes"] == ["MI", "CD"]
+    assert isinstance(out["plots_ovr_classes"], list)
+    # Unrelated params are preserved
+    assert out["lr"] == 0.001

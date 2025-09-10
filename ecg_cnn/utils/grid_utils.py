@@ -12,6 +12,20 @@ import copy
 import itertools
 from typing import Any, Dict, Generator
 
+# ------------------------------------------------------------------------------
+# globals
+# ------------------------------------------------------------------------------
+
+
+# Lists for these keys are treated ATOMICALLY (i.e., not expanded element-by-element).
+# Example: plots_ovr_classes: ["MI","CD"] stays as one list instead of 2 scalar runs.
+SCALAR_LIST_KEYS = {"plots_ovr_classes"}
+
+
+# ------------------------------------------------------------------------------
+# functions
+# ------------------------------------------------------------------------------
+
 
 def is_grid_config(config_dict: Dict[str, Any]) -> bool:
     """
@@ -42,6 +56,8 @@ def expand_grid(config_dict: Dict[str, Any]) -> Generator[Dict[str, Any], None, 
     --------
     - Keys with LIST values are treated as grid axes (lists must be non-empty).
     - Tuples or sets are unsupported for grid axes (raise).
+    - Keys in SCALAR_LIST_KEYS are treated atomically: the entire list is one option.
+    - List-of-lists is supported to express a grid over list-valued options.
     - All other values are static (passed through).
     - This function does NOT validate element types; the consumer should.
 
@@ -68,7 +84,16 @@ def expand_grid(config_dict: Dict[str, Any]) -> Generator[Dict[str, Any], None, 
             if len(v) == 0:
                 # Tests expect anchored message: r"^Grid list for key 'lr' must be non-empty"
                 raise ValueError(f"Grid list for key '{k}' must be non-empty")
-            grid_params[k] = v
+
+            # If key is marked atomic and value is a simple list (not list-of-lists),
+            # keep the ENTIRE list as a single option (avoid per-element expansion).
+            if k in SCALAR_LIST_KEYS and not any(isinstance(x, list) for x in v):
+                grid_params[k] = [v]  # one option: the full list
+            else:
+                # Default behavior: list is the set of options; if it is a list-of-lists,
+                # each sub-list is its own option (grid over list-valued params).
+                grid_params[k] = v
+
         elif isinstance(v, (tuple, set)):
             # Tests expect anchored message: r"^Unsupported iterable type for grid value"
             raise ValueError("Unsupported iterable type for grid value")

@@ -38,11 +38,15 @@ from types import SimpleNamespace
 from ecg_cnn import paths
 from ecg_cnn.config.config_loader import TrainConfig
 from ecg_cnn.data import data_utils
+import ecg_cnn.models as models
+import ecg_cnn.evaluate as evaluate
 
 
 # ------------------------------------------------------------------------------
-# Global, safe defaults for the whole test run
+# Globals and safe defaults for the whole test run
 # ------------------------------------------------------------------------------
+
+_ORIG_MODEL_CLASSES = models.MODEL_CLASSES  # keep the original dict object
 
 
 @pytest.fixture(autouse=True)
@@ -272,3 +276,53 @@ def default_hparams():
         fname_metric="some_metric",
         fold=1,
     )
+
+
+@pytest.fixture(autouse=True)
+def _sandbox_evaluate_paths(tmp_path, monkeypatch):
+    """
+    Prevent evaluate.py from reading/writing the real repo outputs by default.
+    This makes 'prefer=auto' deterministic: it cannot wander into persistent artifacts.
+    """
+    monkeypatch.setattr(evaluate, "OUTPUT_DIR", tmp_path, raising=False)
+    monkeypatch.setattr(evaluate, "RESULTS_DIR", tmp_path, raising=False)
+    monkeypatch.setattr(evaluate, "MODELS_DIR", tmp_path, raising=False)
+    monkeypatch.setattr(evaluate, "REPORTS_DIR", tmp_path / "reports", raising=False)
+    (tmp_path / "reports").mkdir(parents=True, exist_ok=True)
+
+
+@pytest.fixture(autouse=True)
+def _stable_model_registry(monkeypatch):
+    """
+    Ensure the authoritative model registry always contains the names tests expect,
+    and catch any test that mistakenly replaces the dict instead of adding entries.
+    """
+    if not isinstance(models.MODEL_CLASSES, dict):
+        raise RuntimeError("MODEL_CLASSES is not a dict; a test likely replaced it")
+
+    # Minimal tiny model: linear head over flattened input; safe on CPU
+    def _tiny(num_classes, **kw):
+        class _Tiny(torch.nn.Module):
+            def __init__(self, n=num_classes, in_ch=12):
+                super().__init__()
+                self.fc = torch.nn.Linear(in_ch, n, bias=False)
+
+            def forward(self, x):
+                # supports (N,C,T) and (N,C)
+                if getattr(x, "ndim", None) == 3:
+                    x = x.mean(dim=2)
+                return self.fc(x)
+
+        return _Tiny()
+
+    # Ensure BOTH modules point at the SAME original dict object every test
+    if models.MODEL_CLASSES is not _ORIG_MODEL_CLASSES:
+        monkeypatch.setattr(models, "MODEL_CLASSES", _ORIG_MODEL_CLASSES, raising=False)
+    if getattr(evaluate, "MODEL_CLASSES", None) is not _ORIG_MODEL_CLASSES:
+        monkeypatch.setattr(
+            evaluate, "MODEL_CLASSES", _ORIG_MODEL_CLASSES, raising=False
+        )
+
+    # Replace ALL known entries with the tiny stub (don’t replace the dict)
+    for name in list(_ORIG_MODEL_CLASSES.keys()):
+        monkeypatch.setitem(_ORIG_MODEL_CLASSES, name, _tiny)

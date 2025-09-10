@@ -82,7 +82,7 @@ from ecg_cnn.utils.plot_utils import (
 print(">>> USING LOCAL ecg_cnn.evaluate FROM:", __file__)
 
 # ------------------------------------------------------------------------------
-# Globals
+# globals
 # ------------------------------------------------------------------------------
 SEED = 22
 torch.manual_seed(SEED)
@@ -101,7 +101,7 @@ RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ------------------------------------------------------------------------------
-# Helpers
+# helpers
 # ------------------------------------------------------------------------------
 def _latest_config_path() -> Path:
     """
@@ -671,36 +671,6 @@ def main(
     X_tensor = torch.tensor(X, dtype=torch.float32)
     dataset = TensorDataset(X_tensor, y_tensor)
     dataloader = DataLoader(dataset, batch_size=config.batch_size, shuffle=False)
-
-    # # Filter unknown labels and normalize y to a flat 1-D list of scalars
-    # y_list = _as_1d_label_list(y)  # <- guarantees shape semantics sklearn expects
-    # y_arr = np.asarray(y_list, dtype=object)
-    # keep = y_arr != "Unknown"
-
-    # X = X[keep]
-    # y_list = y_arr[keep].tolist()  # still flat 1-D list of scalars
-    # meta = meta.loc[keep].reset_index(drop=True)
-
-    # # Encode labels to integers (sklearn-free to avoid column-vector warnings)
-    # classes, y_encoded = np.unique(np.asarray(y), return_inverse=True)
-    # y_encoded = y_encoded.astype(int)
-
-    # # # Encode labels to integers
-    # # le = LabelEncoder()
-    # # y_encoded = le.fit_transform(y_list)  # <- no DataConversionWarning
-
-    # # X = X[keep]
-    # # y = y_arr[keep]  # stays 1-D, not (n,1)
-    # # meta = meta.loc[keep].reset_index(drop=True)
-
-    # # # Encode labels to integers
-    # # le = LabelEncoder()
-    # # y_encoded = le.fit_transform(y)
-
-    # y_tensor = torch.tensor(y_encoded).long()
-    # X_tensor = torch.tensor(X).float()
-    # dataset = TensorDataset(X_tensor, y_tensor)
-    # dataloader = DataLoader(dataset, batch_size=config.batch_size, shuffle=False)
 
     # Decide which run to evaluate based on --prefer
     best = None  # dict with keys like model, model_path, fold, best_epoch
