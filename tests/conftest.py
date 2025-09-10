@@ -43,7 +43,7 @@ import ecg_cnn.evaluate as evaluate
 
 
 # ------------------------------------------------------------------------------
-# Globals and safe defaults for the whole test run
+# globals and safe defaults for the whole test run
 # ------------------------------------------------------------------------------
 
 _ORIG_MODEL_CLASSES = models.MODEL_CLASSES  # keep the original dict object
