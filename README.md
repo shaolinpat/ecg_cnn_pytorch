@@ -53,12 +53,20 @@ Additional `outputs_*` folders contain precomputed artifacts to illustrate expec
 
 ## Setup
 
-### 1) Clone
+### 1) Clone the repository
 
+Using HTTPS:
 ```bash
 git clone https://github.com/shaolinpat/ecg_cnn_pytorch.git
 cd ecg_cnn_pytorch
 ```
+
+Using SSH:
+```bash
+git clone git@github.com:shaolinpat/ecg_cnn_pytorch.git
+cd ecg_cnn_pytorch
+```
+
 
 ### 2) Environment (Conda recommended)
 
@@ -126,16 +134,41 @@ Outputs appear in `outputs/plots/` and `outputs/reports/`.
 
 ## Tests
 
-Run the full test suite with coverage:
+Run the full test suite with coverage and generate a coverage report:
 
 ```bash
-pytest -vv --maxfail=1 --disable-warnings --cov=ecg_cnn tests/
+pytest tests --cov=ecg_cnn --cov-report=term-missing --cov-branch --cov-report=html
 ```
 
-Generate a coverage report:
+View the coverage report in a browser (pick by operating system).
+
+Linux:
+```bash
+xdg-open htmlcov/index.html
+```
+
+MacOs:
+```bash
+open htmlcov/index.html
+```
+
+Windows:
+```bash
+start htmlcov/index.html
+```
+
+---
+
+## Demo
+
+An interactive demo is provided under [`demos/run_streamlit_ecg_demo.py`](demos/run_streamlit_ecg_demo.py).  
+It uses [Streamlit](https://streamlit.io/) to provide a simple ECG classification interface.
+
+To run the demo locally:
 
 ```bash
-coverage html
+# From the repo root
+python -m streamlit run demos/run_streamlit_ecg_demo.py
 ```
 
 

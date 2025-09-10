@@ -9,6 +9,7 @@ matplotlib
 seaborn
 wfdb
 tqdm
+streamlit>=1.30
 shap>=0.45
 
 # Jupyter tools (Colab includes most already)
