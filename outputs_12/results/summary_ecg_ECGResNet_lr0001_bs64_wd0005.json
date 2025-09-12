@@ -1,0 +1,62 @@
+[
+  {
+    "loss": 0.931586595388238,
+    "elapsed_min": 7.91003113190333,
+    "fold": 1,
+    "model": "ECGResNet",
+    "model_path": "/home/pbeach/Dropbox/VT-MIT/Projects/ecg_cnn_pytorch/outputs/models/model_best_ecg_ECGResNet_lr0001_bs64_wd0005_fold1.pth",
+    "best_epoch": 3,
+    "train_losses": 0.48573339870599397,
+    "val_losses": 1.0030874217070311,
+    "train_accs": 0.8283293954935746,
+    "val_accs": 0.69670430974879
+  },
+  {
+    "loss": 0.9503617666646286,
+    "elapsed_min": 8.860642051696777,
+    "fold": 2,
+    "model": "ECGResNet",
+    "model_path": "/home/pbeach/Dropbox/VT-MIT/Projects/ecg_cnn_pytorch/outputs/models/model_best_ecg_ECGResNet_lr0001_bs64_wd0005_fold2.pth",
+    "best_epoch": 4,
+    "train_losses": 0.41545448258724404,
+    "val_losses": 1.066992045520335,
+    "train_accs": 0.8572004840661557,
+    "val_accs": 0.6907121456556811
+  },
+  {
+    "loss": 0.9475314877394874,
+    "elapsed_min": 7.899597124258677,
+    "fold": 3,
+    "model": "ECGResNet",
+    "model_path": "/home/pbeach/Dropbox/VT-MIT/Projects/ecg_cnn_pytorch/outputs/models/model_best_ecg_ECGResNet_lr0001_bs64_wd0005_fold3.pth",
+    "best_epoch": 3,
+    "train_losses": 0.48375738694726345,
+    "val_losses": 0.9841512536441966,
+    "train_accs": 0.830010372248473,
+    "val_accs": 0.6887966804979253
+  },
+  {
+    "loss": 0.9441234771696418,
+    "elapsed_min": 9.958668796221415,
+    "fold": 4,
+    "model": "ECGResNet",
+    "model_path": "/home/pbeach/Dropbox/VT-MIT/Projects/ecg_cnn_pytorch/outputs/models/model_best_ecg_ECGResNet_lr0001_bs64_wd0005_fold4.pth",
+    "best_epoch": 5,
+    "train_losses": 0.346066580083055,
+    "val_losses": 1.0736777548583327,
+    "train_accs": 0.8825630978448773,
+    "val_accs": 0.6906408483171969
+  },
+  {
+    "loss": 0.9786579656732858,
+    "elapsed_min": 7.906373047828675,
+    "fold": 5,
+    "model": "ECGResNet",
+    "model_path": "/home/pbeach/Dropbox/VT-MIT/Projects/ecg_cnn_pytorch/outputs/models/model_best_ecg_ECGResNet_lr0001_bs64_wd0005_fold5.pth",
+    "best_epoch": 3,
+    "train_losses": 0.4853510999440515,
+    "val_losses": 1.0197100091387237,
+    "train_accs": 0.8334101648035035,
+    "val_accs": 0.669202397418165
+  }
+]

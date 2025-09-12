@@ -50,6 +50,18 @@ _ORIG_MODEL_CLASSES = models.MODEL_CLASSES  # keep the original dict object
 
 
 @pytest.fixture(autouse=True)
+def clear_ovr_env(monkeypatch):
+    """
+    Ensure ECG_PLOTS_* environment variables never leak into tests.
+    This prevents non-deterministic behavior in _resolve_ovr_flags
+    by clearing ECG_PLOTS_OVR_CLASSES and ECG_PLOTS_ENABLE_OVR
+    before each test.
+    """
+    monkeypatch.delenv("ECG_PLOTS_OVR_CLASSES", raising=False)
+    monkeypatch.delenv("ECG_PLOTS_ENABLE_OVR", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_cwd(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 

@@ -1,0 +1,13 @@
+fold,best_epoch,val_acc,val_loss,macro_f1,history_path,cr_csv
+1,9,0.6920949527540908,0.8397435020070715,0.6724850662342234,/home/pbeach/Dropbox/VT-MIT/Projects/ecg_cnn_pytorch/outputs/history/history_ecg_ECGResNet_lr001_bs64_wd0005_fold1.json,/home/pbeach/Dropbox/VT-MIT/Projects/ecg_cnn_pytorch/outputs/artifacts/classification_report_ecg_ECGResNet_lr001_bs64_wd0005_fold1.csv
+2,16,0.7225167089191058,0.840776246012727,0.6773250455602768,/home/pbeach/Dropbox/VT-MIT/Projects/ecg_cnn_pytorch/outputs/history/history_ecg_ECGResNet_lr001_bs64_wd0005_fold2.json,/home/pbeach/Dropbox/VT-MIT/Projects/ecg_cnn_pytorch/outputs/artifacts/classification_report_ecg_ECGResNet_lr001_bs64_wd0005_fold2.csv
+3,8,0.7344398340248963,0.823891658038794,0.6795930497154126,/home/pbeach/Dropbox/VT-MIT/Projects/ecg_cnn_pytorch/outputs/history/history_ecg_ECGResNet_lr001_bs64_wd0005_fold3.json,/home/pbeach/Dropbox/VT-MIT/Projects/ecg_cnn_pytorch/outputs/artifacts/classification_report_ecg_ECGResNet_lr001_bs64_wd0005_fold3.csv
+4,10,0.7247579529737206,0.8244808969710927,0.6754052062590811,/home/pbeach/Dropbox/VT-MIT/Projects/ecg_cnn_pytorch/outputs/history/history_ecg_ECGResNet_lr001_bs64_wd0005_fold4.json,/home/pbeach/Dropbox/VT-MIT/Projects/ecg_cnn_pytorch/outputs/artifacts/classification_report_ecg_ECGResNet_lr001_bs64_wd0005_fold4.csv
+5,12,0.6911018902720147,0.8304171608911236,0.6664469173745668,/home/pbeach/Dropbox/VT-MIT/Projects/ecg_cnn_pytorch/outputs/history/history_ecg_ECGResNet_lr001_bs64_wd0005_fold5.json,/home/pbeach/Dropbox/VT-MIT/Projects/ecg_cnn_pytorch/outputs/artifacts/classification_report_ecg_ECGResNet_lr001_bs64_wd0005_fold5.csv
+
+mean_val_acc,0.7129822677887656
+std_val_acc,0.017916642138829004
+mean_val_loss,0.8318618927841618
+std_val_loss,0.007234313357297414
+mean_macro_f1,0.6742510570287121
+std_macro_f1,0.004546243966848571

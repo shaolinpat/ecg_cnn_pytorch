@@ -1,0 +1,7 @@
+label,precision,recall,f1-score,support
+CD,,,,
+HYP,,,,
+MI,,,,
+NORM,,,,
+STTC,,,,
+macro avg,0.296031746031746,0.18,0.11826141084453105,100.0

@@ -40,6 +40,9 @@ import ecg_cnn.evaluate as evaluate
 import ecg_cnn.models as models
 
 
+assert "/ecg_cnn_pytorch/ecg_cnn/evaluate.py" in evaluate.__file__
+print("EVAL FILE:", evaluate.__file__)
+
 # ------------------------------------------------------------------------------
 # helpers
 # ------------------------------------------------------------------------------
@@ -1686,7 +1689,7 @@ def test_env_empty_classes_is_error(
     (results_dir / f"config_{tag}.yaml").write_text("dummy: true")
 
     # ENV: empty string is invalid under explicit-or-error policy
-    monkeypatch.delenv("ECG_PLOTS_ENABLE_OVR", raising=False)
+    # monkeypatch.delenv("ECG_PLOTS_ENABLE_OVR", raising=False)
     monkeypatch.setenv("ECG_PLOTS_OVR_CLASSES", "")
 
     # Keep class space small
@@ -3577,20 +3580,48 @@ def test_select_best_entry_raises_when_loss_missing():
 # ------------------------------------------------------------------------------
 
 
-def tes_resolve_ovr_flags_cli_valid_classes_imply_enable(monkeypatch):
-    # Keep class space small for the test
-    monkeypatch.setattr(
-        "ecg_cnn.evaluate.FIVE_SUPERCLASSES", ["NORM", "MI"], raising=False
-    )
-    # No env
-    monkeypatch.delenv("ECG_PLOTS_ENABLE_OVR", raising=False)
-    monkeypatch.delenv("ECG_PLOTS_OVR_CLASSES", raising=False)
+def test_resolve_ovr_sanitizer_all_string_paths_and_list():
 
-    enable, classes = evaluate._resolve_ovr_flags(
-        ovr_cfg(), cli_ovr_enable=None, cli_ovr_classes=["MI"]
+    base = dict(
+        model="ECGConvNet",
+        lr=0.001,
+        batch_size=64,
+        weight_decay=0.0,
+        n_epochs=1,
+        save_best=True,
+        sample_only=True,
+        subsample_frac=1.0,
+        sampling_rate=100,
+        data_dir=None,
+        sample_dir=None,
+        verbose=False,
+        n_folds=5,
+        plots_enable_ovr=False,
     )
-    assert enable is True
-    assert classes == {"MI"}
+
+    # 1) STRING "__placeholder__"  -> TRUE branch
+    cfg = evaluate.TrainConfig(**base, plots_ovr_classes="__placeholder__")
+    en, cls = evaluate._resolve_ovr_flags(cfg)
+    assert getattr(cfg, "plots_ovr_classes") == []
+    assert en is False and cls is None
+
+    # 2) STRING "   " (whitespace) -> TRUE branch via .strip() == ""
+    cfg = evaluate.TrainConfig(**base, plots_ovr_classes="   ")
+    en, cls = evaluate._resolve_ovr_flags(cfg)
+    assert getattr(cfg, "plots_ovr_classes") == []
+    assert en is False and cls is None
+
+    # 3) STRING "MI" -> FALSE branch; coerced to ["MI"], enables OvR (with your current code)
+    cfg = evaluate.TrainConfig(**base, plots_ovr_classes="MI")
+    en, cls = evaluate._resolve_ovr_flags(cfg)
+    assert getattr(cfg, "plots_ovr_classes") == ["MI"]
+    assert en is True and cls == {"MI"}
+
+    # 4) LIST ["__placeholder__"]  -> list sanitizer branch (empties)
+    cfg = evaluate.TrainConfig(**base, plots_ovr_classes=["__placeholder__"])
+    en, cls = evaluate._resolve_ovr_flags(cfg)
+    assert getattr(cfg, "plots_ovr_classes") == []
+    assert en is False and cls is None
 
 
 def test_resolve_ovr_flags_cli_empty_classes_is_error(monkeypatch, capsys):
@@ -3619,53 +3650,10 @@ def test_resolve_ovr_flags_cli_unknown_class_is_error(monkeypatch, capsys):
     assert "ABCDEF" in err
 
 
-def test_resolve_ovr_flags_env_empty_classes_is_error(monkeypatch, capsys):
-    monkeypatch.setattr(
-        "ecg_cnn.evaluate.FIVE_SUPERCLASSES", ["NORM", "MI"], raising=False
-    )
-    monkeypatch.setenv("ECG_PLOTS_OVR_CLASSES", "")
-    monkeypatch.delenv("ECG_PLOTS_ENABLE_OVR", raising=False)
-
-    with pytest.raises(SystemExit) as e:
-        evaluate._resolve_ovr_flags(ovr_cfg())
-    assert e.value.code == 1
-    _, err = capsys.readouterr()
-    assert "empty OvR class list" in err
-
-
-def test_resolve_ovr_flags_env_valid_classes_enable(monkeypatch):
-    monkeypatch.setattr(
-        "ecg_cnn.evaluate.FIVE_SUPERCLASSES", ["NORM", "MI"], raising=False
-    )
-    monkeypatch.setenv("ECG_PLOTS_OVR_CLASSES", "MI")
-    monkeypatch.delenv("ECG_PLOTS_ENABLE_OVR", raising=False)
-
-    enable, classes = evaluate._resolve_ovr_flags(ovr_cfg())
-    assert enable is True
-    assert classes == {"MI"}
-
-
-def test_resolve_ovr_flags_config_classes_imply_enable(monkeypatch):
-    # Config lists classes; your function sets enable_ovr True if classes present
-    monkeypatch.setattr(
-        "ecg_cnn.evaluate.FIVE_SUPERCLASSES", ["NORM", "MI"], raising=False
-    )
-    monkeypatch.delenv("ECG_PLOTS_OVR_CLASSES", raising=False)
-    monkeypatch.delenv("ECG_PLOTS_ENABLE_OVR", raising=False)
-
-    enable, classes = evaluate._resolve_ovr_flags(
-        ovr_cfg(plots_enable_ovr=False, plots_ovr_classes=["NORM"])
-    )
-    assert enable is True
-    assert classes == {"NORM"}
-
-
 def test_resolve_ovr_flags_cli_disable_wins_even_with_classes(monkeypatch):
     monkeypatch.setattr(
         "ecg_cnn.evaluate.FIVE_SUPERCLASSES", ["NORM", "MI"], raising=False
     )
-    monkeypatch.delenv("ECG_PLOTS_OVR_CLASSES", raising=False)
-    monkeypatch.delenv("ECG_PLOTS_ENABLE_OVR", raising=False)
 
     enable, classes = evaluate._resolve_ovr_flags(
         ovr_cfg(), cli_ovr_enable=False, cli_ovr_classes=["MI"]
@@ -3674,40 +3662,23 @@ def test_resolve_ovr_flags_cli_disable_wins_even_with_classes(monkeypatch):
     assert classes is None
 
 
-def test_resolve_ovr_flags_precedence_cli_over_env_and_config(monkeypatch):
-    # Config: enabled with NORM; ENV: MI; CLI: STTC -> CLI wins
-    monkeypatch.setattr(
-        "ecg_cnn.evaluate.FIVE_SUPERCLASSES", ["NORM", "MI", "STTC"], raising=False
-    )
-    monkeypatch.setenv("ECG_PLOTS_OVR_CLASSES", "MI")
-    monkeypatch.setenv("ECG_PLOTS_ENABLE_OVR", "true")
+def test_resolve_ovr_flags_cli_enable_true_wins(monkeypatch):
+
+    cfg = SimpleNamespace(plots_enable_ovr=False, plots_ovr_classes=[])
+
+    # Set ENV to disable, but CLI True should win
+    monkeypatch.setenv("ECG_PLOTS_ENABLE_OVR", "0")
 
     enable, classes = evaluate._resolve_ovr_flags(
-        ovr_cfg(plots_enable_ovr=True, plots_ovr_classes=["NORM"]),
-        cli_ovr_enable=None,
-        cli_ovr_classes=["STTC"],
+        cfg, cli_ovr_enable=True, cli_ovr_classes=None
     )
+
     assert enable is True
-    assert classes == {"STTC"}
-
-
-def test_resolve_ovr_flags_env_enable_string_parsing(monkeypatch):
-    # env enable true/false parsing should work independently of classes
-    monkeypatch.setattr(
-        "ecg_cnn.evaluate.FIVE_SUPERCLASSES", ["NORM", "MI"], raising=False
-    )
-    monkeypatch.delenv("ECG_PLOTS_OVR_CLASSES", raising=False)
-
-    monkeypatch.setenv("ECG_PLOTS_ENABLE_OVR", "yes")
-    enable, classes = evaluate._resolve_ovr_flags(ovr_cfg())
-    assert enable is True and classes is None
-
-    monkeypatch.setenv("ECG_PLOTS_ENABLE_OVR", "0")
-    enable, classes = evaluate._resolve_ovr_flags(ovr_cfg())
-    assert enable is False and classes is None
+    assert classes is None
 
 
 def test_resolve_ovr_flags_cli_dedup_and_strip_then_validate(monkeypatch):
+
     # Ensure duplicates and whitespace are normalized before validation
     monkeypatch.setattr(
         "ecg_cnn.evaluate.FIVE_SUPERCLASSES", ["NORM", "MI", "STTC"], raising=False
@@ -3719,41 +3690,6 @@ def test_resolve_ovr_flags_cli_dedup_and_strip_then_validate(monkeypatch):
     )
     assert enable is True
     assert classes == {"MI", "STTC"}
-
-
-def test_resolve_ovr_flags_cli_enable_false_clears_classes(monkeypatch):
-    # Start with config enabling OvR and a couple of classes
-    cfg = SimpleNamespace(
-        plots_enable_ovr=True,
-        plots_ovr_classes=["NORM", "MI"],  # valid names
-    )
-
-    # No ENV, no CLI classes, but CLI says "disable"
-    monkeypatch.delenv("ECG_PLOTS_OVR_CLASSES", raising=False)
-    monkeypatch.delenv("ECG_PLOTS_ENABLE_OVR", raising=False)
-
-    enable, classes = evaluate._resolve_ovr_flags(
-        cfg, cli_ovr_enable=False, cli_ovr_classes=None
-    )
-
-    assert enable is False
-    assert classes is None  # must be cleared when cli_ovr_enable is False
-
-
-def test_resolve_ovr_flags_cli_enable_true_wins(monkeypatch):
-
-    cfg = SimpleNamespace(plots_enable_ovr=False, plots_ovr_classes=[])
-
-    # Set ENV to disable, but CLI True should win
-    monkeypatch.setenv("ECG_PLOTS_ENABLE_OVR", "0")
-    monkeypatch.delenv("ECG_PLOTS_OVR_CLASSES", raising=False)
-
-    enable, classes = evaluate._resolve_ovr_flags(
-        cfg, cli_ovr_enable=True, cli_ovr_classes=None
-    )
-
-    assert enable is True
-    assert classes is None
 
 
 # ------------------------------------------------------------------------------

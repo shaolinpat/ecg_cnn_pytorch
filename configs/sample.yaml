@@ -1,11 +1,36 @@
+# ==============================================================================
 # configs/sample.yaml
-model: ECGResNet
-batch_size: [32, 64]
-lr: 0.001
-weight_decay: 0.0
-n_epochs: 2
-n_folds: 2
+# ==============================================================================
 
-# <- these two lines make it use the tiny bundled data
-sample_only: true
-sample_dir: data/sample
+# ------------------------------------------------------------------------------
+# Model Architecture
+# ------------------------------------------------------------------------------
+model: ECGResNet            # Name of the model class (must match a class defined
+                            #   in models/model_utils.py)
+
+# ------------------------------------------------------------------------------
+# Training Hyperparameters
+# ------------------------------------------------------------------------------
+batch_size: [32, 64]        # Candidate batch sizes (number of samples per update)
+lr: 0.001                   # Learning rate for optimizer (e.g., Adam)
+weight_decay: 0.0           # L2 regularization strength
+n_epochs: 2                 # Total number of training epochs
+
+# ------------------------------------------------------------------------------
+# Data Loading
+# ------------------------------------------------------------------------------
+sample_only: true           # If true, use the tiny bundled sample data
+sample_dir: data/sample     # Directory for sample data
+
+# ------------------------------------------------------------------------------
+# Control Plotting in evaluate.py
+# ------------------------------------------------------------------------------
+plots_enable_ovr: false     # If true, generate one-vs-rest (OvR) plots
+plots_ovr_classes: []       # Replace with any combination from 
+                            #   data/data_utils/FIVE_SUPERCLASSES or with []
+
+# ------------------------------------------------------------------------------
+# Housekeeping
+# ------------------------------------------------------------------------------
+n_folds: 2                  # Number of folds for cross-validation
+verbose: true               # Print config summary and training details

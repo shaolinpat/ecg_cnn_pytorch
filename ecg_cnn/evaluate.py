@@ -79,7 +79,6 @@ from ecg_cnn.utils.plot_utils import (
     save_fold_summary_csv,
 )
 
-print(">>> USING LOCAL ecg_cnn.evaluate FROM:", __file__)
 
 # ------------------------------------------------------------------------------
 # globals
@@ -269,6 +268,22 @@ def _resolve_ovr_flags(
     Returns:
         (enable_ovr: bool, ovr_classes: Optional[set[str]])
     """
+
+    # Sanitize common YAML placeholders before strict validation.
+    # Accept None, "", "__placeholder__", or ["__placeholder__"] as "no classes".
+    # If a single non-placeholder string is provided, coerce to a list.
+    raw_ovr = getattr(config, "plots_ovr_classes", None)
+
+    if isinstance(raw_ovr, str):
+        s = raw_ovr.strip()
+        config.plots_ovr_classes = [] if s in {"", "__placeholder__"} else [s]
+    elif isinstance(raw_ovr, (list, tuple)):
+        config.plots_ovr_classes = [
+            c
+            for c in raw_ovr
+            if c is not None and str(c).strip() not in {"", "__placeholder__"}
+        ]
+    # else: leave as-is (None -> treated as empty later)
 
     valid_set = set(FIVE_SUPERCLASSES)
 

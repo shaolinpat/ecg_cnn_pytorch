@@ -1,43 +1,45 @@
 # ==============================================================================
-# baseline.yaml
+# configs/baseline.yaml
 # Master training configuration (non-nested, flat structure)
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
 # Model Architecture
 # ------------------------------------------------------------------------------
-model: ECGConvNet    # Name of the model class (must match a model in
-                     # models/model_utils.py)
+model: ECGConvNet    # Name of the model class (must match a model or list of  
+                     #   models in models/model_utils.py)
 
 # ------------------------------------------------------------------------------
 # Training Hyperparameters
 # ------------------------------------------------------------------------------
-lr: 0.001            # Learning rate for optimizer (e.g., Adam)
+lr: 0.001            # Learning rate values for optimizer (e.g., Adam)
 batch_size: 64       # Number of samples per gradient update
 weight_decay: 0.0    # L2 regularization strength
 n_epochs: 5          # Total number of training epochs
 save_best: true      # If true, save the model with the lowest val loss
-                     # ohterwise, don't save the model
+                     #   otherwise, don't save the model
 
 # ------------------------------------------------------------------------------
 # Data Loading
 # ------------------------------------------------------------------------------
-sample_only: false   # If true, load a small sample (for testing/debug)
-subsample_frac: 1.0  # Fraction of the full dataset to use (1.0 = all data)
-sampling_rate: 100   # ECG resampling rate in Hz (100 or 500)
-data_dir: null       # Optional override for PTB-XL dataset directory
-sample_dir: null     # Optional override for sample data location
+sample_only: false     # If true, load a small sample (for testing/debug)
+subsample_frac: 1.0    # Fraction of the full dataset to use (1.0 = all data)
+sampling_rate: 100     # ECG resampling rate in Hz (100 or 500)
+data_dir: null         # Optional override for PTB-XL dataset directory
+sample_dir: null       # Optional override for sample data location
 
 # ------------------------------------------------------------------------------
 # Control Plotting in evaluate.py
 # ------------------------------------------------------------------------------
-plots_enable_ovr: false
-plots_ovr_classes: ["__placeholder__"] # replace with any combination from 
-                                       # data/data_utils/FIVE_SUPERCLASSES
+plots_enable_ovr: false                   # If true, generate one-vs-rest (OvR) 
+                                          #   plots during evaluation
+plots_ovr_classes: ["__placeholder__"]    # Replace with any combination from 
+                                          #   data/data_utils/FIVE_SUPERCLASSES 
+                                          #   or with []
 
 # ------------------------------------------------------------------------------
 # Housekeeping
 # ------------------------------------------------------------------------------
-n_folds: 5           # Number of folds to use for cross-validation (e.g., 5 for 
-                     #   5-fold CV).
-verbose: true        # Print config summary and training details
+n_folds: 5       # Number of folds to use for cross-validation (e.g., 5 for 
+                 #   5-fold CV).
+verbose: true    # Print config summary and training details
