@@ -647,10 +647,16 @@ def main(
             sample_only=True,  # force sample-mode
         )
     else:
+        # Pick a root first: config override or canonical path
+        data_root = (
+            Path(config.data_dir)
+            if getattr(config, "data_dir", None)
+            else PTBXL_DATA_DIR
+        )
+
         try:
             X, y, meta = load_ptbxl_full(
-                data_dir=config.data_dir,
-                # sample_dir=config.sample_dir,
+                data_dir=data_root,
                 sampling_rate=config.sampling_rate,
                 subsample_frac=config.subsample_frac,
             )
@@ -662,10 +668,6 @@ def main(
                 ptb_path=None,
                 sample_only=True,
             )
-
-    # # Filter unknown labels with y normalized to 1-D
-    # y_arr = np.asarray(y).reshape(-1)  # ensure shape (n,)
-    # keep = y_arr != "Unknown"
 
     # Filter unknown labels and normalize y to a flat 1-D list of scalars
     y_list = _as_1d_label_list(y)  # guarantees plain scalars in a 1-D sequence

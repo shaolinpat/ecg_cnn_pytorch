@@ -39,3 +39,6 @@ data/ptbxl/
 .coverage
 .coverage.*
 htmlcov/
+
+json
+os

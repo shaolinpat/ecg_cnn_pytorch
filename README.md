@@ -130,10 +130,16 @@ python -m ecg_cnn.train --config configs/compact_grid.yaml
 Evaluate and generate reports + plots:
 
 ```bash
-python -m ecg_cnn.evaluate --fold 1 --prefer latest
+python -m ecg_cnn.evaluate --enable_ovr --prefer accuracy
 ```
 
 Outputs appear in `outputs/plots/` and `outputs/reports/`.
+
+For all command-line options:
+
+```bash
+python -m ecg_cnn.evaluate --help
+```
 
 ---
 
@@ -161,40 +167,76 @@ Windows:
 ```bash
 start htmlcov/index.html
 ```
+---
+
+## Model Selection App
+
+When you launch the exploration app (`streamlit run demos/run_streamlit_ecg_demo.py`), the app looks for a usable model checkpoint in this order:
+
+1. **Best models from training runs**  
+   - If you’ve trained on the full PTB-XL dataset, the demo automatically discovers checkpoints saved under `outputs/models/`.  
+   - It distinguishes between:
+     - *Best by accuracy* → highest validation accuracy  
+     - *Best by loss* → lowest validation loss  
+   - These appear in the dropdown so you can compare them directly.
+
+2. **Environment override**  
+   - You can point the demo to any specific checkpoint by setting:  
+     ```bash
+     export MODEL_TO_USE=/path/to/model.pth
+     ```
+   - This takes priority over bundled or user-trained models.
+
+3. **Bundled sample model checkpoint**  
+   - If no training has been done, the demo falls back to a lightweight `sample_model_ECGConvNet.pth` provided under `demos/checkpoints/`.  
+   - This ensures you always see predictions out of the box, even without running training.
+
+
+4. **Try the sample files**
+
+   - To get started, use the provided demo CSVs under `demos/samples/`:
+
+     - `sample_ecg_cd.csv` — Conduction Disturbance (CD)
+     - `sample_ecg_hyp.csv` — Hypertrophy (HYP)
+     - `sample_ecg_mi.csv` — Myocardial Infarction (MI) 
+     - `sample_ecg_norm.csv` — Normal rhythm (NORM) 
+     - `sample_ecg_sttc.csv` — ST/T Change (STTC) 
+
+   - Or Upload your own CSV with ECG signals. Expected format:  
+    - Columns: `lead1`, `lead2`, …, `lead12`  
+    - Optional `time` column is supported.  
+
+    - These CVS files will be 1000 rows of data for a ten-second sample.
+
+**What you’ll see in the dropdown**
+
+- User-trained models are listed with tags that indicate whether they were *best by accuracy* or *best by loss*.  
+- The bundled checkpoint is labeled as **Demo (bundled)**.  
+- The selected model determines the predictions and confidence scores shown under the ECG plot.
+
+**Takeaway**
+
+- You can immediately run the demo and see results without any setup.  
+- If you’ve trained your own models, the demo highlights them first, with the bundled demo as a fallback.  
+- This mirrors how real ML systems let you compare different checkpoints or evaluation criteria.
+
+
+### Screenshot of Streamlit Demo
+
+Here’s what the ECG classification demo looks like in action:
+
+![Streamlit demo screenshot](images/streamlit_screenshot_full.png)
+
+The 'Checkpoint Selection' dropdown lets you select between checkpoints:
+- **Best (accuracy)** – the model that maximized validation accuracy  
+- **Best (loss)** – the model that minimized validation loss  
+- **Latest** – the most recent model in output/models  
+
+Below the ECG plot, you’ll see predicted diagnostic classes and confidence scores.
+
 
 ---
 
-## Interactive Demo (Streamlit)
-
-The demo is designed for a quick, no-setup preview.  
-It lets you upload an ECG file (one of the sample from demo/samples or your 
-own) and immediately see:
-
-- A plot of the 12-lead waveform
-- The model’s predicted diagnostic class
-- Confidence scores for the prediction
-
-### Run the demo
-
-```
-streamlit run demos/run_streamlit_ecg_demo.py
-```
-
-Then open the link shown in your terminal (usually [http://localhost:8501](http://localhost:8501)).
-
-### Try the sample files
-
-To get started, use the provided demo CSVs under `demos/samples/`:
-
-- `sample_ecg_norm.csv` — Normal rhythm  
-- `sample_ecg_mi.csv` — Myocardial Infarction  
-- `sample_ecg_cd.csv` — Conduction Disturbance  
-- `sample_ecg_hyp.csv` — Hypertrophy  
-- `sample_ecg_sttc.csv` — ST/T Change  
-
-Upload one of these in the Streamlit page and you’ll see the waveform + prediction instantly.
-
----
 
 ## Model Evaluation with Explainability
 
@@ -223,8 +265,6 @@ This pipeline supports **SHAP explainability**, which means:
 - *Evaluation scripts* → full research workflow with explainability (plots, metrics, SHAP attributions).
 
 
-
----
 
 ---
 
