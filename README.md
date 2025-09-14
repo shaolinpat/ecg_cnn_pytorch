@@ -169,15 +169,21 @@ start htmlcov/index.html
 ```
 ---
 
-## Model Selection App
+## ECG Classification Explorer
 
-When you launch the exploration app (`streamlit run demos/run_streamlit_ecg_demo.py`), the app looks for a usable model checkpoint in this order:
+When you launch the exploration app, run 
+```bash
+streamlit run demos/run_streamlit_ecg_app.py 
+```
+The app looks for a usable model checkpoint in this order:
 
-1. **Best models from training runs**  
-   - If you’ve trained on the full PTB-XL dataset, the demo automatically discovers checkpoints saved under `outputs/models/`.  
-   - It distinguishes between:
+1. **Models from training runs**  
+   - If you’ve trained on the small sample dataset included in the GitHub repo or downloaded and trained on the full PTB-XL dataset, the app automatically discovers checkpoints saved under `outputs/models/`.  
+   - It offers you choices between:
      - *Best by accuracy* → highest validation accuracy  
-     - *Best by loss* → lowest validation loss  
+     - *Best by loss* → lowest validation loss
+     - *Latest* → the most recently saved model in the outputs/models folder
+     - *Bundled sample* → an artificially create model so the streamlit app has something to work with
    - These appear in the dropdown so you can compare them directly.
 
 2. **Environment override**  
