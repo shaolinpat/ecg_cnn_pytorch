@@ -12,6 +12,7 @@ import torch.nn.functional as F
 # project imports
 from ecg_cnn.data.data_utils import FIVE_SUPERCLASSES, load_ptbxl_full
 from ecg_cnn.models import MODEL_CLASSES
+from ecg_cnn.paths import PTBXL_DATA_DIR
 
 CLASS_NAMES = list(FIVE_SUPERCLASSES)
 
@@ -56,7 +57,7 @@ def main():
 
     # Load data at the target sampling rate (uses your project’s loader)
     X, y, meta = load_ptbxl_full(
-        data_dir=None, sampling_rate=args.sr, subsample_frac=1.0
+        data_dir=PTBXL_DATA_DIR, sampling_rate=args.sr, subsample_frac=1.0
     )
     X = np.asarray(X)  # (N,12,T)
     y = list(y)

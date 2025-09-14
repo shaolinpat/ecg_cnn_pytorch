@@ -18,6 +18,33 @@ tracking, and repeatable results.
 
 ---
 
+## Table of Contents
+
+- [Why This Project Matters](#why-this-project-matters)
+- [Highlights](#highlights)
+- [Repo Structure (trimmed)](#repo-structure-trimmed)
+- [Setup](#setup)
+- [Quickstart (no downloads)](#quickstart-no-downloads)
+- [Full PTB-XL Download (optional)](#full-ptb-xl-download-optional)
+- [Training](#training)
+- [Evaluation CLI with Explainability](#evaluation-cli-with-explainability)
+- [ECG Classification Explorer (Streamlit)](#ecg-classification-explorer)
+   - [Samples of What You’ll See](#samples-of-what-youll-see)
+   - [Takeaway](#takeaway)
+- [Disclaimer](#disclaimer)
+- [License](#license)
+
+---
+
+## Why This Project Matters
+
+This project shows how raw healthcare signals can be turned into actionable insights with deep learning.  
+It’s designed to look and feel like a real product: quick to launch, intuitive to use, and informative at a glance.  
+
+**In short:**  
+- *Streamlit explorer* → simple, interactive showcase (upload → prediction)  
+- *Evaluation scripts* → full workflow with explainability (plots, metrics, SHAP attributions)  
+
 ## Highlights
 
 - **End-to-end**: data → training (single/k-fold) → evaluation → reports
@@ -26,8 +53,8 @@ tracking, and repeatable results.
 - **Explainability**: SHAP channel-importance summaries
 - **Artifacts**: PR/ROC/confusion plots, per-fold reports, fold-level summary CSVs
 - **Tested**: extensive pytest suite (unit + behavioral), CI-friendly
-- **Fast demo**: ships with tiny sample ECGs to run immediately
-
+- **Fast start**: ships with tiny sample ECGs to run immediately
+- **Full data capable**: easily download the full PTB-XL dataset for full runs
 ---
 
 ## Repo Structure (trimmed)
@@ -37,7 +64,6 @@ ecg_cnn_pytorch/
 ├── data/
 │   ├── sample/     # Tiny CSV sample for quick runs
 │   └── ptbxl/      # (Optional) PTB-XL mirror
-├── demos/          # Streamlit demo
 ├── ecg_cnn/        # Core package
 │   ├── config/     # Config loader
 │   ├── data/       # Dataset & utilities
@@ -46,13 +72,15 @@ ecg_cnn_pytorch/
 │   ├── utils/      # Plotting, validation, grid utils
 │   ├── evaluate.py # Evaluation CLI
 │   └── train.py    # Training CLI
+├── explorer/       # Streamlit app
 ├── outputs/        # Default artifacts (ignored in git)
+├── outputs_12/     # Artifacts saved from a run with configs/grid_12.yaml
+├── outputs_18/     # Artifacts saved from a run with configs/grid_18.yaml
 ├── tests/          # Pytest suite
 ├── environment.yml # Conda env (recommended)
+├── pyproject.toml  # Python packaging metadata (optional, for pip/Poetry builds)
 └── README.md
 ```
-
-Additional `outputs_*` folders contain precomputed artifacts to illustrate expected results.
 
 ---
 
@@ -87,63 +115,7 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
----
-
-## Quickstart (no downloads)
-
-The repo includes a **tiny sample dataset** under `data/sample/` so you can exercise the full pipeline in seconds.
-
-```bash
-# Train a baseline on the sample data
-python -m ecg_cnn.train --config configs/baseline.yaml --sample-only
-```
-
-Artifacts land under `outputs/`:
-- `outputs/results/` — normalized config + run summaries
-- `outputs/models/` — `model_best_*_fold*.pth`
-- `outputs/history/` — `history_*_fold*.json`
-- `outputs/plots/` — accuracy/loss, ROC/PR, confusion matrices, SHAP
-- `outputs/reports/` — per-fold classification reports + aggregated fold summary
-
----
-
-## Full PTB-XL (optional)
-
-Download and stage PTB-XL via the helper script (PhysioNet account & license acceptance required).
-
-```bash
-python scripts/fetch_ptbxl.py
-```
-
-Then train (omit `--sample-only`), optionally using a grid:
-
-```bash
-python -m ecg_cnn.train --config configs/grid.yaml
-# or a compact grid:
-python -m ecg_cnn.train --config configs/compact_grid.yaml
-```
-
----
-
-## Evaluation CLI
-
-Evaluate and generate reports + plots:
-
-```bash
-python -m ecg_cnn.evaluate --enable_ovr --prefer accuracy
-```
-
-Outputs appear in `outputs/plots/` and `outputs/reports/`.
-
-For all command-line options:
-
-```bash
-python -m ecg_cnn.evaluate --help
-```
-
----
-
-## Tests
+### 3) Tests
 
 Run the full test suite with coverage and generate a coverage report:
 
@@ -169,11 +141,86 @@ start htmlcov/index.html
 ```
 ---
 
+
+## Quickstart (no downloads)
+
+The repo includes a **tiny sample dataset** under `data/sample/` so you can exercise the full pipeline in seconds.
+
+```bash
+# Train a baseline on the sample data
+python -m ecg_cnn.train --config configs/baseline.yaml --sample-only
+```
+
+Artifacts land under `outputs/`:
+- `outputs/results/` — normalized config + run summaries
+- `outputs/models/` — `model_best_*_fold*.pth`
+- `outputs/history/` — `history_*_fold*.json`
+- `outputs/plots/` — accuracy/loss, ROC/PR, confusion matrices, SHAP
+- `outputs/reports/` — per-fold classification reports + aggregated fold summary
+
+---
+
+## Full PTB-XL Download (optional)
+
+Download and stage PTB-XL via the helper script (PhysioNet account & license acceptance required).
+
+```bash
+python scripts/fetch_ptbxl.py
+```
+
+## Training
+
+With the full PTB-XL download, omit `--sample-only` from training, which defaults to configs/baseline.yaml. Optionally, specify a configuration file of your choosing. Examples:
+
+```bash
+python -m ecg_cnn.train --config configs/compact_grid.yaml
+# or for a more robust grid:
+python -m ecg_cnn.train --config configs/grid_12.yaml
+```
+
+**Note:** Hyperparameter grid searches can take many hours (or even days), depending on the size of the search space, the dataset, and the available hardware. For early exploratory runs, you can reduce runtime by setting sample_frac in the configuration file to a small value (e.g., 0.01 to use 1 percent of the available data).
+
+This command will show all of the command-line arguments you can use:
+
+
+```bash
+python python -m ecg_cnn.train --help
+```
+---
+
+## Evaluation CLI with Explainability
+
+You can evaluate trained models and generate reports and plots directly from the command line.
+
+### Basic usage
+```bash
+python -m ecg_cnn.evaluate --enable_ovr --prefer accuracy
+```
+
+This will produce outputs in:
+- `outputs/plots/` — evaluation plots (confusion matrices, PR/ROC curves, SHAP bar charts)  
+- `outputs/reports/` — classification reports and summaries  
+
+### Explainability
+The evaluation pipeline supports **SHAP explainability**, which means:
+
+- Per-lead importance scores are computed during evaluation  
+- A bar chart shows which ECG leads contributed most to the prediction  
+- These attributions help explain *why* the model predicted a given class  
+
+### Additional options
+For all available command-line arguments:
+```bash
+python -m ecg_cnn.evaluate --help
+```
+
+---
+
 ## ECG Classification Explorer
 
 When you launch the exploration app, run 
 ```bash
-streamlit run demos/run_streamlit_ecg_app.py 
+streamlit run explorer/run_streamlit_ecg_app.py 
 ```
 The app looks for a usable model checkpoint in this order:
 
@@ -187,20 +234,20 @@ The app looks for a usable model checkpoint in this order:
    - These appear in the dropdown so you can compare them directly.
 
 2. **Environment override**  
-   - You can point the demo to any specific checkpoint by setting:  
+   - You can point the explorer to any specific checkpoint by setting:  
      ```bash
      export MODEL_TO_USE=/path/to/model.pth
      ```
    - This takes priority over bundled or user-trained models.
 
 3. **Bundled sample model checkpoint**  
-   - If no training has been done, the demo falls back to a lightweight `sample_model_ECGConvNet.pth` provided under `demos/checkpoints/`.  
+   - If no training has been done, the explorer falls back to a lightweight `sample_model_ECGConvNet.pth` provided under `explorer/checkpoints/`.  
    - This ensures you always see predictions out of the box, even without running training.
 
 
 4. **Try the sample files**
 
-   - To get started, use the provided demo CSVs under `demos/samples/`:
+   - To get started, use the provided sample CSVs under `explorer/samples/`:
 
      - `sample_ecg_cd.csv` — Conduction Disturbance (CD)
      - `sample_ecg_hyp.csv` — Hypertrophy (HYP)
@@ -214,93 +261,59 @@ The app looks for a usable model checkpoint in this order:
 
     - These CVS files will be 1000 rows of data for a ten-second sample.
 
-**What you’ll see in the dropdown**
+  - The samples were created using `scripts\make_representative_samples.py` which end users can modify to make their own samples.  
 
-- User-trained models are listed with tags that indicate whether they were *best by accuracy* or *best by loss*.  
-- The bundled checkpoint is labeled as **Demo (bundled)**.  
-- The selected model determines the predictions and confidence scores shown under the ECG plot.
-
-**Takeaway**
-
-- You can immediately run the demo and see results without any setup.  
-- If you’ve trained your own models, the demo highlights them first, with the bundled demo as a fallback.  
-- This mirrors how real ML systems let you compare different checkpoints or evaluation criteria.
-
-
-### Screenshot of Streamlit Demo
-
-Here’s what the ECG classification demo looks like in action:
-
-![Streamlit demo screenshot](images/streamlit_screenshot_full.png)
+**Checkpoint selection dropdown**
 
 The 'Checkpoint Selection' dropdown lets you select between checkpoints:
 - **Best (accuracy)** – the model that maximized validation accuracy  
 - **Best (loss)** – the model that minimized validation loss  
 - **Latest** – the most recent model in output/models  
-
-Below the ECG plot, you’ll see predicted diagnostic classes and confidence scores.
-
-
----
-
-
-## Model Evaluation with Explainability
-
-For deeper analysis (e.g., during development or when reviewing model performance),  
-use the evaluation script instead of the demo:
-
-```
-python -m ecg_cnn.evaluate --prefer latest
-```
-
-This pipeline supports **SHAP explainability**, which means:
-
-- Per-lead importance scores are computed during evaluation  
-- A bar chart shows which ECG leads contributed most to the prediction  
-- These attributions help explain *why* the model predicted a class  
-
-### Notes
-
-- SHAP explainability appears automatically when SHAP is installed (already in the environment).  
-- If the dataset is too small or SHAP is not available, the step is skipped gracefully.  
+- **Bundled sample** - the sample model shipped with the repo so the streamlit explorer can be used immediately
+- The selected model determines the predictions and confidence scores shown under the ECG plot.
 
 ---
+
+### Samples of What You’ll See
+
+**Streamlit splash screen**  
+<img src="images/streamli_splash_screen.png" alt="Streamlit splash" width="600"/>  
+*Initial view of the Streamlit Explorer app.*
+
+**Waveform preview**  
+<img src="images/sample_ecg_norm_waveform.png" alt="Waveform preview" width="600"/>  
+*A normalized ECG waveform from the uploaded sample file.*
+
+**Prediction confidences**  
+<img src="images/sample_ecg_norm_prediction_confidences.png" alt="Prediction confidences" width="600"/>  
+*Bar chart showing class confidence probabilities, displayed to four decimal places.*
+
+**Per-lead SHAP importance**  
+<img src="images/sample_ecg_norm_shap_importance.png" alt="SHAP importance" width="600"/>  
+*Mean |SHAP| values aggregated per lead, sorted in lead order and displayed with sloped labels for readability.*
+
+
+### Takeaway
+
+- You can immediately run the explorer and see results without any setup.  
+- If you’ve trained your own models, the explorer highlights them first, with the bundled model as a fallback.  
+- This mirrors how real ML systems let you compare different checkpoints or evaluation criteria.
+
 
 **In short:**  
-- *Streamlit demo* → simple, quick, interactive showcase (upload → prediction).  
+- *Streamlit explorer* → simple, quick, interactive showcase (upload → prediction).  
 - *Evaluation scripts* → full research workflow with explainability (plots, metrics, SHAP attributions).
 
 
+**Notes**
 
+- SHAP explainability appears automatically when SHAP is installed (already in the environment).  
+- If the dataset is too small or SHAP is not available, the step is skipped gracefully.  
 ---
 
----
+## Disclaimer
 
-**Optional extras**
-
-- Some predictions include feature attributions (which leads mattered most).  
-- This helps explain *why* the model predicted what it did.  
-
-These extras appear automatically if you run a model that was trained with SHAP explainability enabled.  
-In the demo:
-- If the uploaded sample is compatible and SHAP is available in the environment,  
-  the app will show a bar chart of per-lead importance scores alongside the prediction.  
-- If SHAP is not installed or if the sample is too small/unsupported, the app will quietly skip this step.  
-
-End users don’t need to configure anything — it’s automatic.  
-Think of it as an “extra insight” that appears when conditions allow, not a separate mode they must enable.
-
-
-**Why This Matters**
-
-This demo shows how raw healthcare signals can be turned into actionable insights with deep learning.  
-It’s designed to look and feel like a real product: quick to launch, intuitive to use, and informative at a glance.  
-
-*No setup beyond a single command and a file upload is required.*
-
----
-
-⚠️ Disclaimer: This demo is for demonstration and educational purposes only.  
+⚠️ Disclaimer: This project is for demonstration and educational purposes only.  
 It is **not a medical device** and should not be used for diagnosis or treatment.
 
 
@@ -308,4 +321,7 @@ It is **not a medical device** and should not be used for diagnosis or treatment
 
 ## License
 
-MIT License (see `LICENSE`).
+This project is licensed under the [MIT License](LICENSE).
+
+
+*Built with scikit-learn 1.7.2 · Streamlit 1.49 · Python 3.11*

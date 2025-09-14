@@ -40,7 +40,7 @@ def parse_training_args(argv=None):
 
         Data loading and preprocessing:
         - sample_only (bool): Whether to run on bundled 100-record sample only.
-        - subsample_frac (float): Fraction of full data to load (e.g., 0.1 = 10%).
+        - subsample_frac (float): Fraction of full data to load (e.g., 0.1 = 10 percent).
         - sampling_rate (int): ECG signal sampling rate (100 or 500 Hz).
         - data_dir (str): Path to the full PTB-XL dataset directory.
         - sample_dir (str): Path to directory with sample_ids.csv or per-record CSVs.
@@ -132,7 +132,7 @@ def parse_training_args(argv=None):
         "--subsample-frac",
         type=float,
         default=None,
-        help="Fraction of full data to load (e.g., 0.1 loads 10%)",
+        help="Fraction of full data to load (e.g., 0.1 loads 10 percent)",
     )
     p.add_argument(
         "--sampling-rate",

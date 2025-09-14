@@ -21,7 +21,7 @@ model = ECGConvNet(
 )
 
 # Make sure the output path exists
-ckpt_dir = Path("demos/checkpoints")
+ckpt_dir = Path("explorer/checkpoints")
 ckpt_dir.mkdir(parents=True, exist_ok=True)
 
 # sample_model_ECGConvNet.pth — includes the model name so the loader can infer it
