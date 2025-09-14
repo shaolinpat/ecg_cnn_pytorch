@@ -60,26 +60,26 @@ It’s designed to look and feel like a real product: quick to launch, intuitive
 ## Repo Structure (trimmed)
 ```
 ecg_cnn_pytorch/
-├── configs/        # Baseline & grid configs (YAML)
+├── configs/           # baseline and grid configs (YAML)
 ├── data/
-│   ├── sample/     # Tiny CSV sample for quick runs
-│   └── ptbxl/      # (Optional) PTB-XL mirror
-├── ecg_cnn/        # Core package
-│   ├── config/     # Config loader
-│   ├── data/       # Dataset & utilities
-│   ├── models/     # Model registry & helpers
-│   ├── training/   # Trainer + CLI args + utils
-│   ├── utils/      # Plotting, validation, grid utils
-│   ├── evaluate.py # Evaluation CLI
-│   └── train.py    # Training CLI
-├── explorer/       # Streamlit app
-├── outputs/        # Default artifacts (ignored in git)
-├── outputs_12/     # Artifacts saved from a run with configs/grid_12.yaml
-├── outputs_18/     # Artifacts saved from a run with configs/grid_18.yaml
-├── tests/          # Pytest suite
-├── environment.yml # Conda env (recommended)
-├── pyproject.toml  # Python packaging metadata (optional, for pip/Poetry builds)
-└── README.md
+│   ├── sample/        # tiny csv sample for quick runs
+│   └── ptbxl/         # optional ptb-xl mirror
+├── ecg_cnn/           # core package
+│   ├── config/        # config loader
+│   ├── data/          # dataset and utilities
+│   ├── models/        # model registry and helpers
+│   ├── training/      # trainer, cli args, and helpers
+│   ├── utils/         # plotting, validation, grid utils
+│   ├── evaluate.py    # evaluation cli
+│   └── train.py       # training cli
+├── explorer/          # streamlit app
+├── outputs/           # default artifacts (ignored in git)
+├── outputs_12/        # artifacts from grid_12.yaml run
+├── outputs_18/        # artifacts from grid_18.yaml run
+├── tests/             # pytest suite
+├── environment.yml    # conda environment definition (recommended)
+├── pyproject.toml     # python packaging metadata (optional)
+└── README.md          # project documentation
 ```
 
 ---
@@ -101,7 +101,7 @@ cd ecg_cnn_pytorch
 ```
 
 
-### 2) Environment (Conda recommended)
+### 2) Environment (conda environment recommended)
 
 ```bash
 conda env create -f environment.yml
@@ -130,7 +130,7 @@ Linux:
 xdg-open htmlcov/index.html
 ```
 
-MacOs:
+macOs:
 ```bash
 open htmlcov/index.html
 ```
@@ -230,7 +230,7 @@ The app looks for a usable model checkpoint in this order:
      - *Best by accuracy* → highest validation accuracy  
      - *Best by loss* → lowest validation loss
      - *Latest* → the most recently saved model in the outputs/models folder
-     - *Bundled sample* → an artificially create model so the streamlit app has something to work with
+     - *Bundled sample* → an artificially created model so the streamlit app has something to work with
    - These appear in the dropdown so you can compare them directly.
 
 2. **Environment override**  
@@ -259,7 +259,7 @@ The app looks for a usable model checkpoint in this order:
     - Columns: `lead1`, `lead2`, …, `lead12`  
     - Optional `time` column is supported.  
 
-    - These CVS files will be 1000 rows of data for a ten-second sample.
+    - These CSV files will be 1000 rows of data for a ten-second sample.
 
   - The samples were created using `scripts\make_representative_samples.py` which end users can modify to make their own samples.  
 
@@ -278,7 +278,7 @@ The 'Checkpoint Selection' dropdown lets you select between checkpoints:
 
 **Streamlit splash screen**  
 <img src="images/streamli_splash_screen.png" alt="Streamlit splash" width="600"/>  
-*Initial view of the Streamlit Explorer app.*
+*Initial view of the Streamlit explorer app.*
 
 **Waveform preview**  
 <img src="images/sample_ecg_norm_waveform.png" alt="Waveform preview" width="600"/>  
